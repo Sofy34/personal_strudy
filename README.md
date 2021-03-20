@@ -1,1 +1,1 @@
-# personal_strudy
+# personal_study

@@ -215,6 +215,10 @@ def split_and_get_text(X,y):
     X_train, X_test, y_train, y_test = train_test_split(X, y,random_state=101,stratify=y)
     return X_train, X_test, y_train, y_test
 
+def get_random_par(db,is_nar,len_threshold=30):
+    return db.query("is_nar==1 & par_len >= @len_threshold").sample(n=1)
+
+
 # utilities function are same as were implemented
 # with Alexander Kruglyak for assigments during the semester
 
@@ -238,11 +242,6 @@ def show_data_basic_information(df):
 def drop_columns(df, columns):
     return df.copy().drop(columns, axis=1)
 
-def get_label_and_drop(_df):
-    df = _df.copy()
-    label = df['label']
-    df = drop_columns(df,['label'])
-    return df, label
 
 def show_random_text(_df,feature,n=1):
     df = _df.sample(n=n,random_state=42)

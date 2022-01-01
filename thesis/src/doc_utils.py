@@ -22,8 +22,9 @@ pd.options.display.float_format = '{:f}'.format
 
 # utils for files 
 
-def remove_punctuation(text):
-    return text.translate(str.maketrans('', '',string.punctuation))
+def remove_punctuation(_text):
+    text = _text.translate(str.maketrans('', '',string.punctuation))
+    return text
  
 
 def get_labeled_files():
@@ -80,28 +81,33 @@ def add_length_of_paragraphs(_df):
     df['par_len'] = df['text'].str.len()
     return df    
 
-def clean_text(_df):
-    df= _df.copy()
-#     df['text'] = df['text'].str.replace(r'\n', '')
-    df['text'] = df['text'].str.replace(r'[@,#,\*,\t]*','')
-#     df['text'] = df['text'].str.replace(r'[a-zA-Z\u0590-\u05FF\u200f\u200e ]+$','')
-    df['text']=remove_punctuation(df['text'].str)
-    return df
+def clean_text(text):
+    text= text.replace(r'[@,#,\*,\t]*','')
+    text=text.replace('\t','')
+    text=remove_punctuation(text)
+    return text
 
 def get_par_type_erase(par,doc_idx,doc_db):
     client_tag = doc_db.loc[doc_idx,'client_tag']
     therapist_tag = doc_db.loc[doc_idx,'therapist_tag']
 #     segment_string = "".join([defines.SEGMENT_HEB,".*[0-9]+"])
     segment_string = "".join(["סגמנט",".*[0-9]"])
+    par_type = 'no_mark'
     if client_tag in par:
         par = par.replace(client_tag, '')
-        return par,'client'
+        par_type = 'client'
     if therapist_tag in par:
         par = par.replace(therapist_tag, '')
-        return par,'therapist'
+        par_type= 'therapist'
     if re.search(segment_string,par):
-        return par,'segment'
-    return par,'no_mark'
+        par_type ='segment'
+    if '%' in par:
+        par = par.replace('%', '')
+        par_type= 'summary'
+    if 'CLIENT' in par or 'THERAPIST' in par:
+        par_type = 'no_mark'
+    par = clean_text(par)
+    return par,par_type
 
 def add_paragraphs_to_db(doc_idx,doc_db,par_db):
     doc = docx.Document(doc_db.loc[doc_idx,'path'])
@@ -112,6 +118,8 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db):
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = par_db.shape[0]
         text,par_type = get_par_type_erase(par.text,doc_idx,doc_db)
+        if par_type == 'summary':
+            continue; # TBD save summary in different db for future use
         par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
         par_db.loc[curr_par_db_idx,'text'] = text
         par_db.loc[curr_par_db_idx,'par_type'] = par_type
@@ -181,7 +189,22 @@ def get_train_test_text(X,y):
     text_test = X_test['text'].to_list()
     print ("len train: {}, len test: {}".format(len(text_train),len(text_test)))
     return text_train, text_test, y_train, y_test
-    
+
+
+def split_db(_db):
+    data,label  = get_label_and_drop(_db)
+    X_train, X_test, y_train, y_test = train_test_split(data, label, stratify=label, random_state=0)
+    return X_train, X_test, y_train, y_test
+
+
+def run_classifier(_db):
+    X_train, X_test, y_train, y_test = split_db(_db)
+    sgc = SGDClassifier()
+    sgc.fit(X_train, y_train)
+    y_pred = sgc.predict(X_test)
+    plot_confusion_matrix(sgc, X_test, y_test, cmap='gray_r')
+    print(classification_report(y_test, y_pred))    
+
 def run_model(db):
     X,y = get_label_and_drop(db)
     text_train,text_test,y_train, y_test = get_train_test_text(X,y)

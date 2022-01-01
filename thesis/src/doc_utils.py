@@ -79,7 +79,10 @@ def get_client_therapist_tag(doc):
 def add_length_of_paragraphs(_df):
     df = _df.copy()
     df['par_len'] = df['text'].str.len()
-    return df    
+    return df
+
+def add_length_of_nar_in_words(_df):
+    _df.loc[_df['nar_len'] is not None,['nar_len_words']] = _df.groupby('nar_idx')['par_len'].sum()
 
 def clean_text(text):
     text= text.replace(r'[@,#,\*,\t]*','')
@@ -112,9 +115,11 @@ def get_par_type_erase(par,doc_idx,doc_db):
 def add_paragraphs_to_db(doc_idx,doc_db,par_db):
     doc = docx.Document(doc_db.loc[doc_idx,'path'])
     inside_narrative  = 0
-    narrative_idx = -1
-    idx_in_nar = -1
+    narrative_idx = -1 #index of narrative within given doc
+    idx_in_nar = -1 #index of paragraph within given narrative
+    par_idx = -1 # index of paragraph within given doc
     pre_par_speaker = ''
+    glob_nar_index = ''
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = par_db.shape[0]
         text,par_type = get_par_type_erase(par.text,doc_idx,doc_db)
@@ -122,7 +127,10 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db):
             continue; # TBD save summary in different db for future use
         par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
         par_db.loc[curr_par_db_idx,'text'] = text
+        par_db.loc[curr_par_db_idx,'par_len'] = len(text)
         par_db.loc[curr_par_db_idx,'par_type'] = par_type
+        par_idx+=1
+        par_db.loc[curr_par_db_idx,'par_idx'] = par_idx
         if par_type == 'no_mark':
             if curr_par_db_idx-1 in par_db.index and par_db.loc[curr_par_db_idx-1,'par_type']=='segment':
                 par_db.loc[curr_par_db_idx,'par_type'] = par_db.loc[curr_par_db_idx-2,'par_type']       
@@ -136,11 +144,14 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db):
             narrative_idx+=1
         par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
         par_db.loc[curr_par_db_idx,'nar_idx'] = narrative_idx if (inside_narrative) else None
+        glob_nar_index = f"{doc_idx}_{narrative_idx}" if (inside_narrative) else None
+        par_db.loc[curr_par_db_idx,'glob_nar_idx'] = glob_nar_index
         par_db.loc[curr_par_db_idx,'idx_in_nar'] = idx_in_nar if (inside_narrative) else None
         idx_in_nar+=1
         if defines.END_CHAR in par.text:
             print ("update nar {} len to {}".format(narrative_idx,idx_in_nar))
-            par_db.loc[par_db['nar_idx']==narrative_idx,'nar_len'] = idx_in_nar
+            par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len'] = idx_in_nar
+            par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len_words'] = par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'par_len'].sum()
             inside_narrative = 0
 
 

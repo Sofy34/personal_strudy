@@ -15,7 +15,7 @@ from sklearn.linear_model import LogisticRegression, LogisticRegressionCV, Passi
 from sklearn.feature_extraction.text import CountVectorizer , TfidfVectorizer, TfidfTransformer
 from sklearn.preprocessing import normalize, StandardScaler, FunctionTransformer
 from sklearn.pipeline import Pipeline, FeatureUnion
-
+from nltk import tokenize
 from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
 pd.options.display.float_format = '{:f}'.format
@@ -109,10 +109,11 @@ def get_par_type_erase(par,doc_idx,doc_db):
         par_type= 'summary'
     if 'CLIENT' in par or 'THERAPIST' in par:
         par_type = 'no_mark'
+    sent_list = tokenize.sent_tokenize(par)
     par = clean_text(par)
-    return par,par_type
+    return par,sent_list,par_type
 
-def add_paragraphs_to_db(doc_idx,doc_db,par_db):
+def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
     doc = docx.Document(doc_db.loc[doc_idx,'path'])
     inside_narrative  = 0
     narrative_idx = -1 #index of narrative within given doc
@@ -122,7 +123,7 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db):
     glob_nar_index = ''
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = par_db.shape[0]
-        text,par_type = get_par_type_erase(par.text,doc_idx,doc_db)
+        text,sent_list,par_type = get_par_type_erase(par.text,doc_idx,doc_db)
         if par_type == 'summary':
             continue; # TBD save summary in different db for future use
         par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
@@ -147,12 +148,26 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db):
         glob_nar_index = f"{doc_idx}_{narrative_idx}" if (inside_narrative) else None
         par_db.loc[curr_par_db_idx,'glob_nar_idx'] = glob_nar_index
         par_db.loc[curr_par_db_idx,'idx_in_nar'] = idx_in_nar if (inside_narrative) else None
+        add_sentence_to_db(sent_list,par_idx,inside_narrative,glob_nar_index,par_type,sent_db) #TBD add parsing per sentence - if narrative includes only part of paragraph
         idx_in_nar+=1
         if defines.END_CHAR in par.text:
             print ("update nar {} len to {}".format(narrative_idx,idx_in_nar))
             par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len'] = idx_in_nar
             par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len_words'] = par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'par_len'].sum()
             inside_narrative = 0
+            
+def add_sentence_to_db(sent_list,par_idx,is_nar,glob_nar_index,par_type,sent_db):
+    for i,sent in enumerate(sent_list):
+        curr_idx = sent_db.shape[0]
+        sent= clean_text(sent)
+        sent_db.loc[curr_idx,'text']=sent
+        sent_db.loc[curr_idx,'is_nar']=is_nar
+        sent_db.loc[curr_idx,'glob_nar_index']=glob_nar_index
+        sent_db.loc[curr_idx,'par_idx']=par_idx
+        sent_db.loc[curr_idx,'sent_len']=len(sent)
+        sent_db.loc[curr_idx,'par_type']=par_type
+    
+    
 
 
 def get_label_and_drop(_df):

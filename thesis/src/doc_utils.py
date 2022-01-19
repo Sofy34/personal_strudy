@@ -20,7 +20,59 @@ from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
 pd.options.display.float_format = '{:f}'.format
 
+doc_cols = ['path','file_name','client_tag','therapist_tag','num_par']
+doc_db = pd.DataFrame(columns=doc_cols)
+par_db =  pd.DataFrame()
+plane_par_db = pd.DataFrame()
 # utils for files 
+
+def split_doc_to_paragraphs(doc,doc_idx):
+    global par_db, plane_par_db
+    inside_narrative = False
+    nar_idx = 0
+    for i,par in enumerate(doc.paragraphs):
+        curr_par_db_idx = plane_par_db.shape[0]
+        text,sent_list,par_type = get_par_type_erase(par.text,doc_idx)
+        if par_type == 'empty':
+#             print("{} is empty: {}".format(i,par.text))
+            continue
+        plane_par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
+        plane_par_db.loc[curr_par_db_idx,'text'] = text
+        plane_par_db.loc[curr_par_db_idx,'par_len'] = len(text)
+        if par_type == 'no_mark':
+            par_type = check_unknown_par_type(curr_par_db_idx)
+        plane_par_db.loc[curr_par_db_idx,'par_type'] = par_type
+        plane_par_db.loc[curr_par_db_idx,'par_idx'] = i
+        if defines.START_CHAR in par.text:
+            inside_narrative = True
+            nar_idx+=1 # starting narrative indexing from 1
+        plane_par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
+        plane_par_db.loc[curr_par_db_idx,'nar_idx'] = nar_idx if inside_narrative else 0
+        if defines.END_CHAR in par.text:
+            inside_narrative = False
+
+def check_unknown_par_type(curr_par_db_idx):
+    one_before_idx = curr_par_db_idx - 1
+    two_before_idx = curr_par_db_idx - 2
+    if one_before_idx in plane_par_db.index and plane_par_db.loc[one_before_idx,'par_type']=='segment':
+        par_type = plane_par_db.loc[two_before_idx,'par_type']
+    else:
+        par_type = 'no_mark'
+    return par_type
+
+def save_all_docs_paragraphs():
+    global doc_db
+    for doc_idx in doc_db.index:
+        doc = docx.Document(doc_db.loc[doc_idx,'path'])
+        split_doc_to_paragraphs(doc,doc_idx)
+
+def save_docs_db():
+    global doc_db
+    doc_path_list = get_labeled_files()
+    doc_obj_list = get_doc_objects(doc_path_list)
+    for path in doc_path_list:
+        add_doc_to_db(path)
+    doc_db.to_csv("doc_db.csv",index=False)
 
 def remove_punctuation(_text):
     text = _text.translate(str.maketrans('', '',string.punctuation))
@@ -29,19 +81,18 @@ def remove_punctuation(_text):
 
 def get_labeled_files():
     doc_path_list = []
-    for file in glob.glob("tmp/*_l.docx"): # _l is name pattern of labeled *.docx files
+    for file in glob.glob("./tmp/*_l.docx"): # _l is name pattern of labeled *.docx files
         doc_path_list.append(file)
     return doc_path_list
 
 def get_doc_objects(doc_path_list):
     doc_list = []
     for path in doc_path_list: 
-        print(path)
         doc_list.append(docx.Document(path))
     return doc_list
 
-def add_doc_to_db(path,doc_db):
-    print(path)
+def add_doc_to_db(path):
+    global doc_db
     file_name = os.path.basename(path)
     doc = docx.Document(path)
     client_tag, therapist_tag = get_client_therapist_tag(doc)
@@ -49,22 +100,6 @@ def add_doc_to_db(path,doc_db):
     doc_list = [path,file_name,client_tag,therapist_tag,num_par]
     doc_db.loc[doc_db.shape[0]] = doc_list
 
-# utils for doc content
-
-# def get_client_therapist_tag(doc):
-#     client_tag = ''
-#     therapist_tag = ''
-#     for par in doc.paragraphs[:20]:
-#         if 'משתתפים' in par.text:
-#             text = remove_punctuation(par.text)
-#             split_par = text.split()
-#             print("DEBUG ",split_par)
-#             client_idx = split_par.index(defines.CLIENT_HEB)
-#             therapist_idx = split_par.index(defines.THERAPIST_HEB)
-#             client_tag = split_par[client_idx-1]
-#             therapist_tag = split_par[therapist_idx-1]
-#             break
-#     return client_tag,therapist_tag
 
 def get_client_therapist_tag(doc):
     client_tag = ''
@@ -90,12 +125,13 @@ def clean_text(text):
     text=remove_punctuation(text)
     return text
 
-def get_par_type_erase(par,doc_idx,doc_db):
+def get_par_type_erase(par,doc_idx):
     client_tag = doc_db.loc[doc_idx,'client_tag']
     therapist_tag = doc_db.loc[doc_idx,'therapist_tag']
-#     segment_string = "".join([defines.SEGMENT_HEB,".*[0-9]+"])
     segment_string = "".join(["סגמנט",".*[0-9]"])
     par_type = 'no_mark'
+    if len(par) == 0:
+        par_type = 'empty'
     if client_tag in par:
         par = par.replace(client_tag, '')
         par_type = 'client'
@@ -104,9 +140,11 @@ def get_par_type_erase(par,doc_idx,doc_db):
         par_type= 'therapist'
     if re.search(segment_string,par):
         par_type ='segment'
-    if '%' in par:
-        par = par.replace('%', '')
-        par_type= 'summary'
+    if not re.search(r'[א-ת]',par) and re.search(r'\d',par): # if there is no hebrew letters and there is numbers
+        par_type = 'segment'
+#     if '%' in par:
+#         par = par.replace('%', '')
+#         par_type= 'summary' # TBD implement summary extraction
     if 'CLIENT' in par or 'THERAPIST' in par:
         par_type = 'no_mark'
     sent_list = tokenize.sent_tokenize(par)
@@ -148,7 +186,7 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
         glob_nar_index = f"{doc_idx}_{narrative_idx}" if (inside_narrative) else None
         par_db.loc[curr_par_db_idx,'glob_nar_idx'] = glob_nar_index
         par_db.loc[curr_par_db_idx,'idx_in_nar'] = idx_in_nar if (inside_narrative) else None
-        add_sentence_to_db(sent_list,par_idx,inside_narrative,glob_nar_index,par_type,sent_db) #TBD add parsing per sentence - if narrative includes only part of paragraph
+        add_sentence_to_db(sent_list,doc_idx,par_idx,inside_narrative,glob_nar_index,par_type,sent_db) #TBD add parsing per sentence - if narrative includes only part of paragraph
         idx_in_nar+=1
         if defines.END_CHAR in par.text:
             print ("update nar {} len to {}".format(narrative_idx,idx_in_nar))
@@ -156,7 +194,7 @@ def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
             par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len_words'] = par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'par_len'].sum()
             inside_narrative = 0
             
-def add_sentence_to_db(sent_list,par_idx,is_nar,glob_nar_index,par_type,sent_db):
+def add_sentence_to_db(sent_list,doc_idx,par_idx,is_nar,glob_nar_index,par_type,sent_db):
     for i,sent in enumerate(sent_list):
         curr_idx = sent_db.shape[0]
         sent= clean_text(sent)
@@ -166,6 +204,7 @@ def add_sentence_to_db(sent_list,par_idx,is_nar,glob_nar_index,par_type,sent_db)
         sent_db.loc[curr_idx,'par_idx']=par_idx
         sent_db.loc[curr_idx,'sent_len']=len(sent)
         sent_db.loc[curr_idx,'par_type']=par_type
+        sent_db.loc[curr_idx,'doc_idx']=doc_idx
     
     
 

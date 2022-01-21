@@ -35,6 +35,59 @@ def count_narr_per_par(par,is_nar):
     return max(par.count(defines.START_CHAR),par.count(defines.END_CHAR),is_nar)
 
 
+def split_par_to_blocks_keep_order(plane_par_db_idx):
+    par = plane_par_db.loc[plane_par_db_idx,'text']
+    startNum = par.count(defines.START_CHAR)
+    endNum = par.count(defines.END_CHAR)
+    block_list = []
+    tag = ""
+    outside_nar = ""
+    splited = []
+
+    
+    if startNum == 0 and endNum == 0: # text is missing start and end symbols
+        if plane_par_db.loc[plane_par_db_idx,'is_nar'] == 0: #entire paragraph is not narrative
+            tag = "not_nar"
+        else: #entire paragraph is narrative
+            tag = "middle"
+        par = clean_text(par)
+        block_list.insert(0,(tag,par))
+    else:
+        splited = re.split('(&|#)', par) # used for keeping original order between blocks
+        for i,block in enumerate(splited):
+            splited[i] = clean_text(block)
+        my_regex = {
+            'whole' :defines.START_CHAR + ".*?" + defines.END_CHAR,     # [start:end] 
+            'start' : defines.START_CHAR + ".*", # [start:]
+            'end' :".*" +  defines.END_CHAR # [:end]
+        }
+        outside_nar = par
+        for tag,regex in my_regex.items():
+            nar_blocks = re.findall(regex,outside_nar)
+            for j,block in enumerate(nar_blocks):
+                if len(block) !=0:
+                    block = clean_text(block)
+                    block_idx = get_index_of_block_in_par(splited,block)
+                    splited[block_idx] = "" # erase narrative blocks from splited paragraph
+                    block_list.insert(block_idx,(tag,block))
+            outside_nar = re.sub(regex,'',outside_nar)
+        
+        # handle the rest items in list - that must be non-narrative
+        for i,block in enumerate(splited):
+            if len(block)!=0:
+        # if len(outside_nar) !=0 :
+                block = clean_text(block)
+                block_idx = get_index_of_block_in_par(splited,block)
+                block_list.insert(block_idx,("not_nar",block))
+    return block_list
+
+def get_index_of_block_in_par(splited,block):
+    if not block in splited:
+        print("{} \n not in \n{}".format(block,splited))
+        return -1
+    else:
+        return splited.index(block)
+    
 def split_par_to_blocks(plane_par_db_idx):
     par = plane_par_db.loc[plane_par_db_idx,'text']
     startNum = par.count(defines.START_CHAR)
@@ -47,6 +100,7 @@ def split_par_to_blocks(plane_par_db_idx):
             tag = "not_nar"
         else: #entire paragraph is narrative
             tag = "middle"
+        par = clean_text(par)
         block_list.append((tag,par))
     else:
         my_regex = {
@@ -59,11 +113,18 @@ def split_par_to_blocks(plane_par_db_idx):
             nar_blocks = re.findall(regex,outside_nar)
             for j,block in enumerate(nar_blocks):
                 if len(block) !=0:
+                    block = clean_text(block)
                     block_list.append((tag,block))
             outside_nar = re.sub(regex,'',outside_nar)
     if len(outside_nar) !=0 :
+        outside_nar= clean_text(outside_nar)
         block_list.append(("not_nar",outside_nar))
     return block_list
+
+def add_features_prev_is_nar():
+    global block_db
+    block_db['one_before_is_nar']=block_db['is_nar'].shift(periods=1, fill_value=0)
+    block_db['two_before_is_nar']=block_db['is_nar'].shift(periods=2, fill_value=0)
 
 
 def get_last_nar_idx_from_block_db():
@@ -73,7 +134,8 @@ def get_last_nar_idx_from_block_db():
 def add_blocks_of_par_to_db(plane_par_db_idx):
     global plane_par_db, block_db
     is_nar = 0
-    block_list = split_par_to_blocks(plane_par_db_idx)
+    # block_list = split_par_to_blocks(plane_par_db_idx)
+    block_list = split_par_to_blocks_keep_order(plane_par_db_idx)
     for i,tupple in enumerate(block_list):
         curr_db_idx = block_db.shape[0]
         curr_nar_idx = 0 if curr_db_idx == 0 else get_last_nar_idx_from_block_db() 
@@ -93,6 +155,7 @@ def save_all_blocks():
     global plane_par_db
     for i in plane_par_db.index:
         add_blocks_of_par_to_db(i)
+    add_features_prev_is_nar()
     print("All blocks saved")
 
 def split_doc_to_paragraphs(doc,doc_idx):
@@ -118,7 +181,7 @@ def split_doc_to_paragraphs(doc,doc_idx):
         plane_par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
         plane_par_db.loc[curr_par_db_idx,'nar_per_par'] = count_narr_per_par(text,inside_narrative)
         plane_par_db.loc[curr_par_db_idx,'nar_idx'] = nar_idx if inside_narrative else 0
-        if defines.END_CHAR in par.text:
+        if defines.END_CHAR in par.text and not (defines.START_CHAR in par.text):
             inside_narrative = 0
     print("Doc {} paragraphs saved".format(doc_idx))
 
@@ -194,7 +257,7 @@ def add_length_of_nar_in_words(_df):
     _df.loc[_df['nar_len'] is not None,['nar_len_words']] = _df.groupby('nar_idx')['par_len'].sum()
 
 def clean_text(text):
-    text= text.replace(r'[@,#,\*,\t]*','')
+    text= text.replace(r'[@,#,&,\*,\t]*','')
     text=text.replace('\t','')
     text=remove_punctuation(text)
     return text

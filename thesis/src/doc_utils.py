@@ -26,9 +26,16 @@ par_db =  pd.DataFrame()
 plane_par_db = pd.DataFrame()
 # utils for files 
 
+def get_random_paragraph(query):
+    match =  plane_par_db.query(query)
+    return match.sample()
+
+def count_narr_per_par(par,is_nar):
+    return max(par.count(defines.START_CHAR),par.count(defines.END_CHAR),is_nar)
+
 def split_doc_to_paragraphs(doc,doc_idx):
     global par_db, plane_par_db
-    inside_narrative = False
+    inside_narrative = 0
     nar_idx = 0
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = plane_par_db.shape[0]
@@ -44,12 +51,13 @@ def split_doc_to_paragraphs(doc,doc_idx):
         plane_par_db.loc[curr_par_db_idx,'par_type'] = par_type
         plane_par_db.loc[curr_par_db_idx,'par_idx'] = i
         if defines.START_CHAR in par.text:
-            inside_narrative = True
+            inside_narrative = 1
             nar_idx+=1 # starting narrative indexing from 1
         plane_par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
+        plane_par_db.loc[curr_par_db_idx,'nar_per_par'] = count_narr_per_par(text,inside_narrative)
         plane_par_db.loc[curr_par_db_idx,'nar_idx'] = nar_idx if inside_narrative else 0
         if defines.END_CHAR in par.text:
-            inside_narrative = False
+            inside_narrative = 0
 
 def check_unknown_par_type(curr_par_db_idx):
     one_before_idx = curr_par_db_idx - 1
@@ -165,8 +173,10 @@ def extract_narrative_sentences(par,par_idx):
     defines.START_CHAR + ".*", # [start:]
     ".*" +  defines.END_CHAR] # [:end]
     for i,regex in enumerate(my_regex):
-        nar = re.findall(regex,outside_nar)
-        nar_list.append(nar)
+        nar_blocks = re.findall(regex,outside_nar)
+        for j,block in enumerate(nar_blocks):
+            if len(block) !=0:
+                nar_list.append(block)
         outside_nar = re.sub(regex,'',outside_nar)
     return nar_list,outside_nar
 

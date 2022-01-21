@@ -125,7 +125,7 @@ def clean_text(text):
     text=remove_punctuation(text)
     return text
 
-def get_par_type_erase(par,doc_idx):
+def get_par_type_erase(par,doc_idx,do_clean=False):
     client_tag = doc_db.loc[doc_idx,'client_tag']
     therapist_tag = doc_db.loc[doc_idx,'therapist_tag']
     segment_string = "".join(["סגמנט",".*[0-9]"])
@@ -148,8 +148,27 @@ def get_par_type_erase(par,doc_idx):
     if 'CLIENT' in par or 'THERAPIST' in par:
         par_type = 'no_mark'
     sent_list = tokenize.sent_tokenize(par)
-    par = clean_text(par)
+    if(do_clean):
+        par = clean_text(par)
     return par,sent_list,par_type
+
+def extract_narrative_sentences(par,par_idx):
+    startNum = par.count(defines.START_CHAR)
+    endNum = par.count(defines.END_CHAR)
+    nar_list = []
+    outside_nar = par
+
+    if startNum == 0 and endNum == 0: # text does not contains narrative
+        outside_nar = par
+        return nar_list,outside_nar
+    my_regex = [defines.START_CHAR + ".*?" + defines.END_CHAR,     # [start:end] 
+    defines.START_CHAR + ".*", # [start:]
+    ".*" +  defines.END_CHAR] # [:end]
+    for i,regex in enumerate(my_regex):
+        nar = re.findall(regex,outside_nar)
+        nar_list.append(nar)
+        outside_nar = re.sub(regex,'',outside_nar)
+    return nar_list,outside_nar
 
 def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
     doc = docx.Document(doc_db.loc[doc_idx,'path'])

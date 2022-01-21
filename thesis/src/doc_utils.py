@@ -24,6 +24,7 @@ doc_cols = ['path','file_name','client_tag','therapist_tag','num_par']
 doc_db = pd.DataFrame(columns=doc_cols)
 par_db =  pd.DataFrame()
 plane_par_db = pd.DataFrame()
+block_db = pd.DataFrame()
 # utils for files 
 
 def get_random_paragraph(query):
@@ -32,6 +33,67 @@ def get_random_paragraph(query):
 
 def count_narr_per_par(par,is_nar):
     return max(par.count(defines.START_CHAR),par.count(defines.END_CHAR),is_nar)
+
+
+def split_par_to_blocks(plane_par_db_idx):
+    par = plane_par_db.loc[plane_par_db_idx,'text']
+    startNum = par.count(defines.START_CHAR)
+    endNum = par.count(defines.END_CHAR)
+    block_list = []
+    tag = ""
+    outside_nar = ""
+    if startNum == 0 and endNum == 0: # text is missing start and end symbols
+        if plane_par_db.loc[plane_par_db_idx,'is_nar'] == 0: #entire paragraph is not narrative
+            tag = "not_nar"
+        else: #entire paragraph is narrative
+            tag = "middle"
+        block_list.append((tag,par))
+    else:
+        my_regex = {
+            'whole' :defines.START_CHAR + ".*?" + defines.END_CHAR,     # [start:end] 
+            'start' : defines.START_CHAR + ".*", # [start:]
+            'end' :".*" +  defines.END_CHAR # [:end]
+        }
+        outside_nar = par
+        for tag,regex in my_regex.items():
+            nar_blocks = re.findall(regex,outside_nar)
+            for j,block in enumerate(nar_blocks):
+                if len(block) !=0:
+                    block_list.append((tag,block))
+            outside_nar = re.sub(regex,'',outside_nar)
+    if len(outside_nar) !=0 :
+        block_list.append(("not_nar",outside_nar))
+    return block_list
+
+
+def get_last_nar_idx_from_block_db():
+    global block_db
+    return block_db['nar_idx'].max()
+
+def add_blocks_of_par_to_db(plane_par_db_idx):
+    global plane_par_db, block_db
+    is_nar = 0
+    block_list = split_par_to_blocks(plane_par_db_idx)
+    for i,tupple in enumerate(block_list):
+        curr_db_idx = block_db.shape[0]
+        curr_nar_idx = 0 if curr_db_idx == 0 else get_last_nar_idx_from_block_db() 
+        if tupple[0] in ['start','whole']:
+            curr_nar_idx+=1
+        is_nar = 1 if tupple[0] != 'not_nar' else 0
+        block_db.loc[curr_db_idx,'text'] = tupple[1]
+        block_db.loc[curr_db_idx,'is_nar'] = is_nar
+        block_db.loc[curr_db_idx,'doc_idx'] = plane_par_db.loc[plane_par_db_idx,'doc_idx']
+        block_db.loc[curr_db_idx,'par_idx'] = plane_par_db.loc[plane_par_db_idx,'par_idx']
+        block_db.loc[curr_db_idx,'par_type'] = plane_par_db.loc[plane_par_db_idx,'par_type']
+        block_db.loc[curr_db_idx,'block_type'] = tupple[0]
+        block_db.loc[curr_db_idx,'nar_idx'] = curr_nar_idx if is_nar else 0
+
+
+def save_all_blocks():
+    global plane_par_db
+    for i in plane_par_db.index:
+        add_blocks_of_par_to_db(i)
+    print("All blocks saved")
 
 def split_doc_to_paragraphs(doc,doc_idx):
     global par_db, plane_par_db
@@ -58,6 +120,7 @@ def split_doc_to_paragraphs(doc,doc_idx):
         plane_par_db.loc[curr_par_db_idx,'nar_idx'] = nar_idx if inside_narrative else 0
         if defines.END_CHAR in par.text:
             inside_narrative = 0
+    print("Doc {} paragraphs saved".format(doc_idx))
 
 def check_unknown_par_type(curr_par_db_idx):
     one_before_idx = curr_par_db_idx - 1
@@ -73,6 +136,9 @@ def save_all_docs_paragraphs():
     for doc_idx in doc_db.index:
         doc = docx.Document(doc_db.loc[doc_idx,'path'])
         split_doc_to_paragraphs(doc,doc_idx)
+
+
+
 
 def save_docs_db():
     global doc_db
@@ -160,25 +226,7 @@ def get_par_type_erase(par,doc_idx,do_clean=False):
         par = clean_text(par)
     return par,sent_list,par_type
 
-def extract_narrative_sentences(par,par_idx):
-    startNum = par.count(defines.START_CHAR)
-    endNum = par.count(defines.END_CHAR)
-    nar_list = []
-    outside_nar = par
 
-    if startNum == 0 and endNum == 0: # text does not contains narrative
-        outside_nar = par
-        return nar_list,outside_nar
-    my_regex = [defines.START_CHAR + ".*?" + defines.END_CHAR,     # [start:end] 
-    defines.START_CHAR + ".*", # [start:]
-    ".*" +  defines.END_CHAR] # [:end]
-    for i,regex in enumerate(my_regex):
-        nar_blocks = re.findall(regex,outside_nar)
-        for j,block in enumerate(nar_blocks):
-            if len(block) !=0:
-                nar_list.append(block)
-        outside_nar = re.sub(regex,'',outside_nar)
-    return nar_list,outside_nar
 
 def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
     doc = docx.Document(doc_db.loc[doc_idx,'path'])

@@ -9,15 +9,8 @@ import defines
 import numpy as np
 import pandas as pd
 import seaborn as sns
-import matplotlib.pyplot as plt
-from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
-from sklearn.linear_model import LogisticRegression, LogisticRegressionCV, PassiveAggressiveClassifier, Perceptron, RidgeClassifier, RidgeClassifierCV, SGDClassifier
-from sklearn.feature_extraction.text import CountVectorizer , TfidfVectorizer, TfidfTransformer
-from sklearn.preprocessing import normalize, StandardScaler, FunctionTransformer
-from sklearn.pipeline import Pipeline, FeatureUnion
-from nltk import tokenize
-from bidi import algorithm as bidialg      # needed for arabic, hebrew
-from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
+
+
 pd.options.display.float_format = '{:f}'.format
 
 doc_cols = ['path','file_name','client_tag','therapist_tag','num_par']
@@ -25,6 +18,7 @@ doc_db = pd.DataFrame(columns=doc_cols)
 par_db =  pd.DataFrame()
 plane_par_db = pd.DataFrame()
 block_db = pd.DataFrame()
+sent_db = pd.DataFrame()
 # utils for files 
 
 def get_random_paragraph(query):
@@ -44,6 +38,30 @@ def check_text_for_illegal_labels(doc_idx,par):
         return 1
     return 0
 
+def split_block_to_sentences(text):
+    sent_list = tokenize.sent_tokenize(text)
+    for i,item in enumerate(sent_list):
+        sent_list[i] = clean_text(item)
+    return sent_list
+
+def add_sentences_of_blocks_to_db(block_db_idx):
+    global sent_db
+    block_line = block_db.iloc[block_db_idx]
+    block = block_line['text']
+    sent_list = split_block_to_sentences(block)
+    for i,sentence in enumerate(sent_list):
+        curr_db_idx = sent_db.shape[0]
+        sent_db.loc[curr_db_idx,'text'] = sentence
+        sent_db.loc[curr_db_idx,'sent_idx_in_block'] = i
+        sent_db.loc[curr_db_idx,'block_idx'] = block_db_idx
+        sent_db.loc[curr_db_idx,'is_nar'] = block_line['is_nar']
+        sent_db.loc[curr_db_idx,'doc_idx'] = block_line['doc_idx']
+        sent_db.loc[curr_db_idx,'par_idx'] = block_line['par_idx']
+        sent_db.loc[curr_db_idx,'par_type'] = block_line['par_type']
+        sent_db.loc[curr_db_idx,'block_type'] = block_line['block_type']
+        sent_db.loc[curr_db_idx,'nar_idx'] = block_line['nar_idx']
+        
+
 def split_par_to_blocks_keep_order(plane_par_db_idx):
     par = plane_par_db.loc[plane_par_db_idx,'text']
     startNum = par.count(defines.START_CHAR)
@@ -58,14 +76,15 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
             tag = "not_nar"
         else: #entire paragraph is narrative
             tag = "middle"
-        par = clean_text(par)
+        # par = clean_text(par)
         block_list.insert(0,(tag,par))
     else:
         splited = re.split('(&|#)', par) # used for keeping original order between blocks
+        splited_clean = splited
         for i,block in enumerate(splited):
             if '%' in block: # TBD handle story summary
                 continue
-            splited[i] = clean_text(block)
+            splited_clean[i] = clean_text(block)
         my_regex = {
             'whole' :defines.START_CHAR + ".*?" + defines.END_CHAR,     # [start:end] 
             'start' : defines.START_CHAR + ".*", # [start:]
@@ -76,8 +95,8 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
             nar_blocks = re.findall(regex,outside_nar)
             for j,block in enumerate(nar_blocks):
                 if len(block) !=0:
-                    block = clean_text(block)
-                    block_idx = get_index_of_block_in_par(splited,block,plane_par_db_idx)
+                    # block = clean_text(block)
+                    block_idx = get_index_of_block_in_par(splited_clean,block,plane_par_db_idx)
                     splited[block_idx] = "" # erase narrative blocks from splited paragraph
                     block_list.insert(block_idx,(tag,block))
             outside_nar = re.sub(regex,'',outside_nar)
@@ -88,12 +107,13 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
         # if len(outside_nar) !=0 :
                 if '%' in block:
                     continue # TBD handle story summary
-                block = clean_text(block)
-                block_idx = get_index_of_block_in_par(splited,block,plane_par_db_idx)
+                # block = clean_text(block)
+                block_idx = get_index_of_block_in_par(splited_clean,block,plane_par_db_idx)
                 block_list.insert(block_idx,("not_nar",block))
     return block_list
 
 def get_index_of_block_in_par(splited,block,plane_par_db_idx):
+    block = clean_text(block)
     if not block in splited:
         print("{} \n par[{}]not in \n{}".format(plane_par_db_idx,block,splited))
         return -1
@@ -167,8 +187,13 @@ def save_all_blocks():
     global plane_par_db
     for i in plane_par_db.index:
         add_blocks_of_par_to_db(i)
-    add_features_prev_is_nar()
     print("All blocks saved")
+
+def save_all_sentences():
+    global block_db
+    for i in block_db.index:
+        add_sentences_of_blocks_to_db(i)
+    print("All sentences saved")
 
 def split_doc_to_paragraphs(doc,doc_idx):
     global par_db, plane_par_db
@@ -362,152 +387,3 @@ def add_sentence_to_db(sent_list,doc_idx,par_idx,is_nar,glob_nar_index,par_type,
     
 
 
-def get_label_and_drop(_df):
-    df = _df.copy()
-    label = df[defines.LABEL]
-    df = drop_columns(df,[defines.LABEL])
-    return df, label
-
-def drop_columns(df, columns):
-    return df.copy().drop(columns, axis=1)
-
-
-# machine learning tils
-def load_stop_words():
-    stop_words = [x.strip() for x in open('heb_stopwords.txt','r').read().split('\n')]
-    return stop_words
-
-def plot_important_features(coef, feature_names, top_n=20, ax=None, rotation=60):
-    if ax is None:
-        ax = plt.gca()
-    inds = np.argsort(coef)
-    low = inds[:top_n]
-    high = inds[-top_n:]
-    important = np.hstack([low, high])
-    myrange = range(len(important))
-    colors = ['red'] * top_n + ['blue'] * top_n
-    
-    ax.bar(myrange, coef[important], color=colors)
-    ax.set_xticks(myrange)
-    heb_feature_names =[bidialg.get_display(feature) for feature in feature_names[important]]
-    ax.set_xticklabels(heb_feature_names, rotation=rotation, ha="right")
-    ax.set_xlim(-.7, 2 * top_n)
-    ax.set_frame_on(False)
-
-    
-def sample_features(features):
-    n = len(features)
-    print(features[:20])
-    print(features[round(n/2)-10:round(n/2)+10])
-    print(features[::round(n/10)])
-    
-def get_train_test_text(X,y):
-    X_train, X_test, y_train, y_test = split_and_get_text(X, y)
-    text_train = X_train['text'].to_list()
-    text_test = X_test['text'].to_list()
-    print ("len train: {}, len test: {}".format(len(text_train),len(text_test)))
-    return text_train, text_test, y_train, y_test
-
-
-def split_db(_db):
-    data,label  = get_label_and_drop(_db)
-    X_train, X_test, y_train, y_test = train_test_split(data, label, stratify=label, random_state=0)
-    return X_train, X_test, y_train, y_test
-
-
-def run_classifier(_db):
-    X_train, X_test, y_train, y_test = split_db(_db)
-    sgc = SGDClassifier()
-    sgc.fit(X_train, y_train)
-    y_pred = sgc.predict(X_test)
-    plot_confusion_matrix(sgc, X_test, y_test, cmap='gray_r')
-    print(classification_report(y_test, y_pred))    
-
-def run_model(db):
-    X,y = get_label_and_drop(db)
-    text_train,text_test,y_train, y_test = get_train_test_text(X,y)
-
-    tdif = TfidfVectorizer(stop_words=load_stop_words(),min_df=4)
-
-
-    X_train_vec = tdif.fit_transform(text_train)
-    X_train_vec = normalize(X_train_vec,norm="l1")
-
-    X_test_vec = tdif.transform(text_test)
-    X_test_vec = normalize(X_test_vec,norm="l1")
-
-    feature_names = tdif.get_feature_names()
-    sample_features(feature_names)
-
-    sgc = SGDClassifier()
-    sgc.fit(X_train_vec, y_train)
-    y_pred = sgc.predict(X_test_vec)
-
-    plt.figure(figsize=(15, 6))
-    plot_important_features(sgc.coef_.ravel(), np.array(tdif.get_feature_names()), top_n=20, rotation=40)
-    ax = plt.gca()
-    plt.show()
-
-    plot_confusion_matrix(sgc, X_test_vec, y_test, cmap='gray_r')
-    print(classification_report(y_test, y_pred))
-    
-def split_and_get_text(X,y):
-    print ("total data len: {}".format(len(y)))
-    X_train, X_test, y_train, y_test = train_test_split(X, y,random_state=101,stratify=y)
-    return X_train, X_test, y_train, y_test
-
-def get_random_par(db,is_nar,len_threshold=30):
-    return db.query("is_nar==1 & par_len >= @len_threshold").sample(n=1)
-
-
-# utilities function are same as were implemented
-# with Alexander Kruglyak for assigments during the semester
-
-def show_data_basic_information(df):
-    print("Info\n")
-    print(df.info())
-    print("\n" + "*" * 10 + "\n")
-    
-    print("Shape\n")
-    print(df.shape) 
-    print("\n" + "*" * 10 + "\n")
-    
-    print("Amount of is null data\n")
-    print(df.isnull().sum().max())
-    print("\n" + "*" * 10 + "\n")
-    
-    print("Describe\n")
-    display(df.describe())
-    print("\n" + "*" * 10 + "\n")
-    
-def drop_columns(df, columns):
-    return df.copy().drop(columns, axis=1)
-
-
-def show_random_text(_df,feature,n=1):
-    df = _df.sample(n=n,random_state=42)
-    print(list(df[feature]))
-    
-def get_cross_val_score(scores_df,estimator,X_train,y_train,prefix="",sampler=None):
-        name = estimator.__class__.__name__
-        pipe = estimator
-        sampler_name = ""
-        if sampler is not None:
-            pipe = make_imb_pipeline(sampler(random_state=42), estimator)
-            sampler_name = sampler.__name__
-        print('*********' + name + ' ' + sampler_name + '*********')
-        full_scores = cross_validate(
-            pipe,
-            X_train, 
-            y_train, 
-            cv=10,
-            scoring=('roc_auc', 'average_precision', 'recall', 'f1'),
-            n_jobs = -1
-        )
-        add_score(scores_df, full_scores, estimator.__class__.__name__,prefix)
-        
-def add_score(scores_df, scores, regressorName, dataType):
-    scores_df.loc[regressorName + '_' + dataType, 'f1'] = scores['test_f1'].mean()
-    scores_df.loc[regressorName + '_' + dataType, 'roc_auc'] = scores['test_roc_auc'].mean()
-    scores_df.loc[regressorName + '_' + dataType, 'recall'] = scores['test_recall'].mean()
-    scores_df.loc[regressorName + '_' + dataType, 'average_precision'] = scores['test_average_precision'].mean()

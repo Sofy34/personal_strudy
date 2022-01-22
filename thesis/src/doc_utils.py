@@ -34,6 +34,15 @@ def get_random_paragraph(query):
 def count_narr_per_par(par,is_nar):
     return max(par.count(defines.START_CHAR),par.count(defines.END_CHAR),is_nar)
 
+def check_text_for_illegal_labels(doc_idx,par):
+        # capture if there is [start:start] or [end:end]
+    error_pattern_st = "(" + defines.START_CHAR + "(?:(?!" + defines.END_CHAR + ").)*" +  defines.START_CHAR +")";
+    error_pattern_end = "(" + defines.END_CHAR + "(?:(?!" + defines.START_CHAR + ").)*" +  defines.END_CHAR +")";
+    error_pattern = "(" + error_pattern_st + "|" +  error_pattern_end + ")";
+    if (re.search(error_pattern,par)):
+        print("Doc {}\nstring gave ERROR\n{}".format(doc_idx,par))
+        return 1
+    return 0
 
 def split_par_to_blocks_keep_order(plane_par_db_idx):
     par = plane_par_db.loc[plane_par_db_idx,'text']
@@ -44,7 +53,6 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
     outside_nar = ""
     splited = []
 
-    
     if startNum == 0 and endNum == 0: # text is missing start and end symbols
         if plane_par_db.loc[plane_par_db_idx,'is_nar'] == 0: #entire paragraph is not narrative
             tag = "not_nar"
@@ -55,6 +63,8 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
     else:
         splited = re.split('(&|#)', par) # used for keeping original order between blocks
         for i,block in enumerate(splited):
+            if '%' in block: # TBD handle story summary
+                continue
             splited[i] = clean_text(block)
         my_regex = {
             'whole' :defines.START_CHAR + ".*?" + defines.END_CHAR,     # [start:end] 
@@ -67,7 +77,7 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
             for j,block in enumerate(nar_blocks):
                 if len(block) !=0:
                     block = clean_text(block)
-                    block_idx = get_index_of_block_in_par(splited,block)
+                    block_idx = get_index_of_block_in_par(splited,block,plane_par_db_idx)
                     splited[block_idx] = "" # erase narrative blocks from splited paragraph
                     block_list.insert(block_idx,(tag,block))
             outside_nar = re.sub(regex,'',outside_nar)
@@ -76,14 +86,16 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
         for i,block in enumerate(splited):
             if len(block)!=0:
         # if len(outside_nar) !=0 :
+                if '%' in block:
+                    continue # TBD handle story summary
                 block = clean_text(block)
-                block_idx = get_index_of_block_in_par(splited,block)
+                block_idx = get_index_of_block_in_par(splited,block,plane_par_db_idx)
                 block_list.insert(block_idx,("not_nar",block))
     return block_list
 
-def get_index_of_block_in_par(splited,block):
+def get_index_of_block_in_par(splited,block,plane_par_db_idx):
     if not block in splited:
-        print("{} \n not in \n{}".format(block,splited))
+        print("{} \n par[{}]not in \n{}".format(plane_par_db_idx,block,splited))
         return -1
     else:
         return splited.index(block)
@@ -284,6 +296,7 @@ def get_par_type_erase(par,doc_idx,do_clean=False):
 #         par_type= 'summary' # TBD implement summary extraction
     if 'CLIENT' in par or 'THERAPIST' in par:
         par_type = 'no_mark'
+    check_text_for_illegal_labels(doc_idx,par)
     sent_list = tokenize.sent_tokenize(par)
     if(do_clean):
         par = clean_text(par)

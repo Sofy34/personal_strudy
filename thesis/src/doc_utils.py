@@ -9,6 +9,7 @@ import defines
 import numpy as np
 import pandas as pd
 import seaborn as sns
+from nltk import tokenize
 
 
 pd.options.display.float_format = '{:f}'.format
@@ -20,6 +21,17 @@ plane_par_db = pd.DataFrame()
 block_db = pd.DataFrame()
 sent_db = pd.DataFrame()
 # utils for files 
+
+# def check_par_types_order():
+#     error_order= {
+#         'middle': ['whole', 'non_nar'],
+#         'start' : ['whole', 'non_nar'],
+#         'end' : ['middle']
+#         'non_nar' : ['whole','middle,'end']
+#         }  
+
+
+
 
 def get_random_paragraph(query):
     match =  plane_par_db.query(query)
@@ -56,10 +68,13 @@ def add_sentences_of_blocks_to_db(block_db_idx):
         sent_db.loc[curr_db_idx,'block_idx'] = block_db_idx
         sent_db.loc[curr_db_idx,'is_nar'] = block_line['is_nar']
         sent_db.loc[curr_db_idx,'doc_idx'] = block_line['doc_idx']
-        sent_db.loc[curr_db_idx,'par_idx'] = block_line['par_idx']
+        sent_db.loc[curr_db_idx,'par_db_idx'] = block_line['par_db_idx']
+        sent_db.loc[curr_db_idx,'par_idx_in_doc'] = block_line['par_idx_in_doc']
         sent_db.loc[curr_db_idx,'par_type'] = block_line['par_type']
         sent_db.loc[curr_db_idx,'block_type'] = block_line['block_type']
         sent_db.loc[curr_db_idx,'nar_idx'] = block_line['nar_idx']
+        sent_db.loc[curr_db_idx,'sent_len'] = len(sentence)
+
         
 
 def split_par_to_blocks_keep_order(plane_par_db_idx):
@@ -168,6 +183,7 @@ def add_blocks_of_par_to_db(plane_par_db_idx):
     is_nar = 0
     # block_list = split_par_to_blocks(plane_par_db_idx)
     block_list = split_par_to_blocks_keep_order(plane_par_db_idx)
+    par_db_line = plane_par_db.iloc[plane_par_db_idx]
     for i,tupple in enumerate(block_list):
         curr_db_idx = block_db.shape[0]
         curr_nar_idx = 0 if curr_db_idx == 0 else get_last_nar_idx_from_block_db() 
@@ -176,9 +192,10 @@ def add_blocks_of_par_to_db(plane_par_db_idx):
         is_nar = 1 if tupple[0] != 'not_nar' else 0
         block_db.loc[curr_db_idx,'text'] = tupple[1]
         block_db.loc[curr_db_idx,'is_nar'] = is_nar
-        block_db.loc[curr_db_idx,'doc_idx'] = plane_par_db.loc[plane_par_db_idx,'doc_idx']
-        block_db.loc[curr_db_idx,'par_idx'] = plane_par_db.loc[plane_par_db_idx,'par_idx']
-        block_db.loc[curr_db_idx,'par_type'] = plane_par_db.loc[plane_par_db_idx,'par_type']
+        block_db.loc[curr_db_idx,'doc_idx'] = par_db_line['doc_idx']
+        block_db.loc[curr_db_idx,'par_idx_in_doc'] = par_db_line['par_idx_in_doc']
+        block_db.loc[curr_db_idx,'par_db_idx'] = plane_par_db_idx
+        block_db.loc[curr_db_idx,'par_type'] = par_db_line['par_type']
         block_db.loc[curr_db_idx,'block_type'] = tupple[0]
         block_db.loc[curr_db_idx,'nar_idx'] = curr_nar_idx if is_nar else 0
 
@@ -201,7 +218,7 @@ def split_doc_to_paragraphs(doc,doc_idx):
     nar_idx = 0
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = plane_par_db.shape[0]
-        text,sent_list,par_type = get_par_type_erase(par.text,doc_idx)
+        text,par_type = get_par_type_erase(par.text,doc_idx)
         if par_type == 'empty':
 #             print("{} is empty: {}".format(i,par.text))
             continue
@@ -211,7 +228,7 @@ def split_doc_to_paragraphs(doc,doc_idx):
         if par_type == 'no_mark':
             par_type = check_unknown_par_type(curr_par_db_idx)
         plane_par_db.loc[curr_par_db_idx,'par_type'] = par_type
-        plane_par_db.loc[curr_par_db_idx,'par_idx'] = i
+        plane_par_db.loc[curr_par_db_idx,'par_idx_in_doc'] = i
         if defines.START_CHAR in par.text:
             inside_narrative = 1
             nar_idx+=1 # starting narrative indexing from 1
@@ -302,17 +319,17 @@ def clean_text(text):
 def get_par_type_erase(par,doc_idx,do_clean=False):
     client_tag = doc_db.loc[doc_idx,'client_tag']
     therapist_tag = doc_db.loc[doc_idx,'therapist_tag']
-    segment_string = "".join(["סגמנט",".*[0-9]"])
+    segment_string = "(סגמנט|דקה)" + ".*[0-9]"
     par_type = 'no_mark'
     if len(par) == 0:
         par_type = 'empty'
-    if client_tag in par:
+    if client_tag in par[:20]: # search for a tag in the begginning of a line
         par = par.replace(client_tag, '')
         par_type = 'client'
-    if therapist_tag in par:
+    if therapist_tag in par[:20]: # search for a tag in the begginning of a line
         par = par.replace(therapist_tag, '')
         par_type= 'therapist'
-    if re.search(segment_string,par):
+    if re.search(segment_string,par[:20]):
         par_type ='segment'
     if not re.search(r'[א-ת]',par) and re.search(r'\d',par): # if there is no hebrew letters and there is numbers
         par_type = 'segment'
@@ -322,67 +339,65 @@ def get_par_type_erase(par,doc_idx,do_clean=False):
     if 'CLIENT' in par or 'THERAPIST' in par:
         par_type = 'no_mark'
     check_text_for_illegal_labels(doc_idx,par)
-    sent_list = tokenize.sent_tokenize(par)
     if(do_clean):
         par = clean_text(par)
-    return par,sent_list,par_type
+    return par,par_type
 
 
 
-def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
-    doc = docx.Document(doc_db.loc[doc_idx,'path'])
-    inside_narrative  = 0
-    narrative_idx = -1 #index of narrative within given doc
-    idx_in_nar = -1 #index of paragraph within given narrative
-    par_idx = -1 # index of paragraph within given doc
-    pre_par_speaker = ''
-    glob_nar_index = ''
-    for i,par in enumerate(doc.paragraphs):
-        curr_par_db_idx = par_db.shape[0]
-        text,sent_list,par_type = get_par_type_erase(par.text,doc_idx,doc_db)
-        if par_type == 'summary':
-            continue; # TBD save summary in different db for future use
-        par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
-        par_db.loc[curr_par_db_idx,'text'] = text
-        par_db.loc[curr_par_db_idx,'par_len'] = len(text)
-        par_db.loc[curr_par_db_idx,'par_type'] = par_type
-        par_idx+=1
-        par_db.loc[curr_par_db_idx,'par_idx'] = par_idx
-        if par_type == 'no_mark':
-            if curr_par_db_idx-1 in par_db.index and par_db.loc[curr_par_db_idx-1,'par_type']=='segment':
-                par_db.loc[curr_par_db_idx,'par_type'] = par_db.loc[curr_par_db_idx-2,'par_type']       
-        if par_db.loc[curr_par_db_idx,'par_type'] in ['segment','no_mark']:
-            par_db.loc[curr_par_db_idx,'is_nar'] = 0
-            print("skipping for doc {} entry {} type {} text {}".format(doc_idx,curr_par_db_idx,par_db.loc[curr_par_db_idx,'par_type'],text))
-            continue # skip parahraph processing
-        if defines.START_CHAR in par.text:
-            inside_narrative = 1
-            idx_in_nar = 0
-            narrative_idx+=1
-        par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
-        par_db.loc[curr_par_db_idx,'nar_idx'] = narrative_idx if (inside_narrative) else None
-        glob_nar_index = f"{doc_idx}_{narrative_idx}" if (inside_narrative) else None
-        par_db.loc[curr_par_db_idx,'glob_nar_idx'] = glob_nar_index
-        par_db.loc[curr_par_db_idx,'idx_in_nar'] = idx_in_nar if (inside_narrative) else None
-        add_sentence_to_db(sent_list,doc_idx,par_idx,inside_narrative,glob_nar_index,par_type,sent_db) #TBD add parsing per sentence - if narrative includes only part of paragraph
-        idx_in_nar+=1
-        if defines.END_CHAR in par.text:
-            print ("update nar {} len to {}".format(narrative_idx,idx_in_nar))
-            par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len'] = idx_in_nar
-            par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len_words'] = par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'par_len'].sum()
-            inside_narrative = 0
+# def add_paragraphs_to_db(doc_idx,doc_db,par_db,sent_db):
+#     doc = docx.Document(doc_db.loc[doc_idx,'path'])
+#     inside_narrative  = 0
+#     narrative_idx = -1 #index of narrative within given doc
+#     idx_in_nar = -1 #index of paragraph within given narrative
+#     par_idx = -1 # index of paragraph within given doc
+#     pre_par_speaker = ''
+#     glob_nar_index = ''
+#     for i,par in enumerate(doc.paragraphs):
+#         curr_par_db_idx = par_db.shape[0]
+#         text,par_type = get_par_type_erase(par.text,doc_idx,doc_db)
+#         if par_type == 'summary':
+#             continue; # TBD save summary in different db for future use
+#         par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
+#         par_db.loc[curr_par_db_idx,'text'] = text
+#         par_db.loc[curr_par_db_idx,'par_len'] = len(text)
+#         par_db.loc[curr_par_db_idx,'par_type'] = par_type
+#         par_idx+=1
+#         par_db.loc[curr_par_db_idx,'par_idx'] = par_idx
+#         if par_type == 'no_mark':
+#             if curr_par_db_idx-1 in par_db.index and par_db.loc[curr_par_db_idx-1,'par_type']=='segment':
+#                 par_db.loc[curr_par_db_idx,'par_type'] = par_db.loc[curr_par_db_idx-2,'par_type']       
+#         if par_db.loc[curr_par_db_idx,'par_type'] in ['segment','no_mark']:
+#             par_db.loc[curr_par_db_idx,'is_nar'] = 0
+#             print("skipping for doc {} entry {} type {} text {}".format(doc_idx,curr_par_db_idx,par_db.loc[curr_par_db_idx,'par_type'],text))
+#             continue # skip parahraph processing
+#         if defines.START_CHAR in par.text:
+#             inside_narrative = 1
+#             idx_in_nar = 0
+#             narrative_idx+=1
+#         par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
+#         par_db.loc[curr_par_db_idx,'nar_idx'] = narrative_idx if (inside_narrative) else None
+#         glob_nar_index = f"{doc_idx}_{narrative_idx}" if (inside_narrative) else None
+#         par_db.loc[curr_par_db_idx,'glob_nar_idx'] = glob_nar_index
+#         par_db.loc[curr_par_db_idx,'idx_in_nar'] = idx_in_nar if (inside_narrative) else None
+#         idx_in_nar+=1
+#         if defines.END_CHAR in par.text:
+#             print ("update nar {} len to {}".format(narrative_idx,idx_in_nar))
+#             par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len'] = idx_in_nar
+#             par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'nar_len_words'] = par_db.loc[par_db['glob_nar_idx']==glob_nar_index,'par_len'].sum()
+#             inside_narrative = 0
             
-def add_sentence_to_db(sent_list,doc_idx,par_idx,is_nar,glob_nar_index,par_type,sent_db):
-    for i,sent in enumerate(sent_list):
-        curr_idx = sent_db.shape[0]
-        sent= clean_text(sent)
-        sent_db.loc[curr_idx,'text']=sent
-        sent_db.loc[curr_idx,'is_nar']=is_nar
-        sent_db.loc[curr_idx,'glob_nar_index']=glob_nar_index
-        sent_db.loc[curr_idx,'par_idx']=par_idx
-        sent_db.loc[curr_idx,'sent_len']=len(sent)
-        sent_db.loc[curr_idx,'par_type']=par_type
-        sent_db.loc[curr_idx,'doc_idx']=doc_idx
+# def add_sentence_to_db(sent_list,doc_idx,par_idx,is_nar,glob_nar_index,par_type,sent_db):
+#     for i,sent in enumerate(sent_list):
+#         curr_idx = sent_db.shape[0]
+#         sent= clean_text(sent)
+#         sent_db.loc[curr_idx,'text']=sent
+#         sent_db.loc[curr_idx,'is_nar']=is_nar
+#         sent_db.loc[curr_idx,'glob_nar_index']=glob_nar_index
+#         sent_db.loc[curr_idx,'par_idx']=par_idx
+#         sent_db.loc[curr_idx,'sent_len']=len(sent)
+#         sent_db.loc[curr_idx,'par_type']=par_type
+#         sent_db.loc[curr_idx,'doc_idx']=doc_idx
     
     
 

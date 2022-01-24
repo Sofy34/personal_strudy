@@ -53,7 +53,9 @@ def check_text_for_illegal_labels(doc_idx,par):
 def split_block_to_sentences(text):
     sent_list = tokenize.sent_tokenize(text)
     for i,item in enumerate(sent_list):
-        sent_list[i] = clean_text(item)
+        clean_item = clean_text(item)
+        if len(clean_item) != 0: # disregard empty strings
+            sent_list[i] = clean_item
     return sent_list
 
 def add_sentences_of_blocks_to_db(block_db_idx):
@@ -201,15 +203,17 @@ def add_blocks_of_par_to_db(plane_par_db_idx):
 
 
 def save_all_blocks():
-    global plane_par_db
+    global plane_par_db,block_db
     for i in plane_par_db.index:
         add_blocks_of_par_to_db(i)
+    block_db.to_csv("block_db.csv",index=False)
     print("All blocks saved")
 
 def save_all_sentences():
-    global block_db
+    global block_db, sent_db
     for i in block_db.index:
         add_sentences_of_blocks_to_db(i)
+    sent_db.to_csv("sent_db.csv",index=False)
     print("All sentences saved")
 
 def split_doc_to_paragraphs(doc,doc_idx):

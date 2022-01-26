@@ -4,14 +4,29 @@ import defines
 
 from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
 from sklearn.linear_model import LogisticRegression, LogisticRegressionCV, PassiveAggressiveClassifier, Perceptron, RidgeClassifier, RidgeClassifierCV, SGDClassifier
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.svm import SVC
 from sklearn.feature_extraction.text import CountVectorizer , TfidfVectorizer, TfidfTransformer
 from sklearn.preprocessing import normalize, StandardScaler, FunctionTransformer
 from sklearn.pipeline import Pipeline, FeatureUnion
+from sklearn.metrics import ConfusionMatrixDisplay
 from nltk import tokenize
 from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
 import matplotlib.pyplot as plt
 
+regressors = [
+    LogisticRegression(random_state=0),
+    LogisticRegressionCV(random_state=0),
+    PassiveAggressiveClassifier(random_state=0),
+    Perceptron(random_state=0),
+    RidgeClassifier(random_state=0),
+    RidgeClassifierCV(),
+    SGDClassifier(random_state=0),
+    SVC(random_state=0),
+    DecisionTreeClassifier(random_state=0)
+]
+scores_df = pd.DataFrame(dtype=float)
 
 def get_num_text_union(df):
     numeric_cols = df.columns[df.columns.dtype != object].tolist()
@@ -138,10 +153,15 @@ def run_model(db):
 
     plot_confusion_matrix(sgc, X_test_vec, y_test, cmap='gray_r')
     print(classification_report(y_test, y_pred))
-    
+
+
+def get_prediction_report(y_test,y_pred):
+    ConfusionMatrixDisplay.from_predictions(y_test, y_pred,cmap='gray_r')
+    print(classification_report(y_test, y_pred))
+
 def split_and_get_text(X,y):
     print ("total data len: {}".format(len(y)))
-    X_train, X_test, y_train, y_test = train_test_split(X, y,random_state=101,stratify=y)
+    X_train, X_test, y_train, y_test = train_test_split(X, y,random_state=101,stratify=y.name)
     return X_train, X_test, y_train, y_test
 
 def get_random_par(db,is_nar,len_threshold=30):
@@ -176,7 +196,8 @@ def show_random_text(_df,feature,n=1):
     df = _df.sample(n=n,random_state=42)
     print(list(df[feature]))
     
-def get_cross_val_score(scores_df,estimator,X_train,y_train,prefix="",sampler=None):
+def get_cross_val_score(estimator,X_train,y_train,prefix="",sampler=None):
+        global scores_df
         name = estimator.__class__.__name__
         pipe = estimator
         sampler_name = ""
@@ -192,10 +213,17 @@ def get_cross_val_score(scores_df,estimator,X_train,y_train,prefix="",sampler=No
             scoring=('roc_auc', 'average_precision', 'recall', 'f1'),
             n_jobs = -1
         )
-        add_score(scores_df, full_scores, estimator.__class__.__name__,prefix)
+        add_score(full_scores, estimator.__class__.__name__,prefix)
         
-def add_score(scores_df, scores, regressorName, dataType):
+def add_score(scores, regressorName, dataType):
+    global scores_df
     scores_df.loc[regressorName + '_' + dataType, 'f1'] = scores['test_f1'].mean()
     scores_df.loc[regressorName + '_' + dataType, 'roc_auc'] = scores['test_roc_auc'].mean()
     scores_df.loc[regressorName + '_' + dataType, 'recall'] = scores['test_recall'].mean()
     scores_df.loc[regressorName + '_' + dataType, 'average_precision'] = scores['test_average_precision'].mean()
+
+
+def run_on_all_regerssors(X_train,y_train,feature_set):
+    global scores_df
+    for regr in regressors:
+        get_cross_val_score(regr, X_train, y_train,feature_set)

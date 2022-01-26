@@ -161,13 +161,19 @@ def get_prediction_report(y_test,y_pred):
 
 def split_and_get_text(X,y):
     print ("total data len: {}".format(len(y)))
-    X_train, X_test, y_train, y_test = train_test_split(X, y,random_state=101,stratify=y.name)
+    X_train, X_test, y_train, y_test = train_test_split(X, y,random_state=101,stratify=y)
     return X_train, X_test, y_train, y_test
 
 def get_random_par(db,is_nar,len_threshold=30):
     return db.query("is_nar==1 & par_len >= @len_threshold").sample(n=1)
 
 
+def add_features_prev_is_nar(_db):
+    # global db = globals()[_db]
+    db = _db.copy()
+    db['one_before_is_nar']=db['is_nar'].shift(periods=1, fill_value=0)
+    db['two_before_is_nar']=db['is_nar'].shift(periods=2, fill_value=0)
+    return db
 # utilities function are same as were implemented
 # with Alexander Kruglyak for assigments during the semester
 
@@ -197,7 +203,7 @@ def show_random_text(_df,feature,n=1):
     print(list(df[feature]))
     
 def get_cross_val_score(estimator,X_train,y_train,prefix="",sampler=None):
-        global scores_df
+        global scores_
         name = estimator.__class__.__name__
         pipe = estimator
         sampler_name = ""

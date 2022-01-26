@@ -170,10 +170,6 @@ def split_par_to_blocks(plane_par_db_idx):
         block_list.append(("not_nar",outside_nar))
     return block_list
 
-def add_features_prev_is_nar():
-    global block_db
-    block_db['one_before_is_nar']=block_db['is_nar'].shift(periods=1, fill_value=0)
-    block_db['two_before_is_nar']=block_db['is_nar'].shift(periods=2, fill_value=0)
 
 
 def get_last_nar_idx_from_block_db():

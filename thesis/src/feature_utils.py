@@ -14,6 +14,7 @@ from nltk import tokenize
 from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
 import matplotlib.pyplot as plt
+import fasttext.util
 
 regressors = [
     LogisticRegression(random_state=0),
@@ -27,6 +28,16 @@ regressors = [
     DecisionTreeClassifier(random_state=0)
 ]
 scores_df = pd.DataFrame(dtype=float)
+ft = fasttext.load_model('./external_src/cc.he.300.bin')
+
+def get_vector_per_sentence(db, dim = 300):
+    global ft
+    if (dim < 300):
+        fasttext.util.reduce_model(ft, dim)
+    sent_vectors = [ft.get_sentence_vector(row['text']) for index, row in db.iterrows()]
+    # sent_array = np.vstack(sent_vectors)
+    sent_vec_db = pd.DataFrame(sent_vectors)
+    return sent_vec_db
 
 def get_num_text_union(df):
     numeric_cols = df.columns[df.columns.dtype != object].tolist()

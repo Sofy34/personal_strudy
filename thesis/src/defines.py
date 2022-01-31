@@ -5,3 +5,4 @@ LABEL = 'is_nar'
 THERAPIST_HEB = "מטפל"
 CLIENT_HEB = "קליינט"
 SEGMENT_HEB = "סגמנט"
+PATH_TO_DFS = "dataframes"

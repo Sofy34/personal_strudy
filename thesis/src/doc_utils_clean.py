@@ -47,6 +47,7 @@ def add_sent_column_for_labels():
     sent_db['is_client'] =  np.where(sent_db['par_type'] == 'client', 1, 0)
 
 def split_block_to_sentences(text):
+    text = remove_brakets(text) # important to remove before we split into sentences
     sent_list = tokenize.sent_tokenize(text)
     for i,item in enumerate(sent_list):
         clean_item = clean_text(item)
@@ -154,12 +155,25 @@ def add_blocks_of_par_to_db(plane_par_db_idx):
         block_db.loc[curr_db_idx,'block_type'] = tupple[0]
         block_db.loc[curr_db_idx,'nar_idx'] = curr_nar_idx if is_nar else 0
 
+def read_csv(base_filename):
+    return pd.read_csv("/".join([".",defines.PATH_TO_DFS, base_filename]))
+
+def save_df_to_csv(df_name, is_global = True):
+    path_to_save = "/".join([".",defines.PATH_TO_DFS,df_name])
+    _df = globals().get(df_name,None)
+    if _df is None:
+        print("Can't find global df {}".format(df_name))
+        return 1
+    else:
+        _df.to_csv("{}.csv".format(path_to_save),index=False)
+        return 0
+
 
 def save_all_blocks():
     global plane_par_db,block_db
     for i in plane_par_db.index:
         add_blocks_of_par_to_db(i)
-    block_db.to_csv("block_db.csv",index=False)
+    save_df_to_csv(block_db)
     print("All blocks saved")
 
 def save_all_sentences():
@@ -167,7 +181,7 @@ def save_all_sentences():
     for i in block_db.index:
         add_sentences_of_blocks_to_db(i)
     add_sent_column_for_labels()
-    sent_db.to_csv("sent_db.csv",index=False)
+    save_df_to_csv(sent_db)
     print("All sentences saved")
 
 def split_doc_to_paragraphs(doc_idx):
@@ -204,7 +218,7 @@ def save_docs_db():
     doc_path_list = get_labeled_files()
     for path in doc_path_list:
         add_doc_to_db(path)
-    doc_db.to_csv("doc_db.csv",index=False)
+    save_df_to_csv(doc_db)
 
 def remove_punctuation(_text):
     text = _text.translate(str.maketrans('', '',string.punctuation))
@@ -225,11 +239,13 @@ def add_doc_to_db(path):
     doc_db.loc[doc_idx,'path'] = path
     doc_db.loc[doc_idx,'file_name'] = file_name
 
+def remove_brakets(text):
+    text = re.sub(r'\[.*?\]','',text) # remove " [brakets with text"]
+    return text
 
 def clean_text(text):
     text,_ =  extract_narrative_summary(text)
     text = remove_lr_annotation(text)
-    text = re.sub(r'\[.*\]','',text) # remove " [brakets with text"]
     text = re.sub('\t','',text)
     text=remove_punctuation(text)
     return text

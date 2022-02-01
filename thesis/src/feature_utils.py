@@ -108,7 +108,20 @@ def plot_important_features(coef, feature_names, top_n=20, ax=None, rotation=60)
     ax.set_xlim(-.7, 2 * top_n)
     ax.set_frame_on(False)
 
-    
+
+def get_yap_tag_description(tag):
+    desc = defines.YAP_TAG_DICT['MY_POS_TAG_DICT'].get(tag,tag)
+    # if desc is not None:
+    #     return desc
+    # yap_tag = defines.HEB2UDPOS_DICT.get(tag,None)
+    # if yap_tag is None:
+    #     return tag
+    # for key, value  in defines.YAP_TAG_DICT.items():
+    #     desc = value.get(yap_tag,'')
+    #     if len(desc)!=0 :
+    #         return desc
+    return desc
+
 def sample_features(features):
     n = len(features)
     print(features[:20])

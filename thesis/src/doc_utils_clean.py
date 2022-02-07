@@ -14,15 +14,14 @@ from nltk import tokenize
 
 pd.options.display.float_format = '{:f}'.format
 
-doc_db = pd.DataFrame()
-plane_par_db = pd.DataFrame()
-block_db = pd.DataFrame()
-sent_db = pd.DataFrame()
-
+global doc_db
+global par_db
+global block_db
+global sent_db
 
 
 def get_random_paragraph(query):
-    match =  plane_par_db.query(query)
+    match =  par_db.query(query)
     return match.sample()
 
 
@@ -47,13 +46,25 @@ def add_sent_column_for_labels():
     sent_db['is_client'] =  np.where(sent_db['par_type'] == 'client', 1, 0)
 
 def split_block_to_sentences(text):
+    text = remove_lr_annotation(text)
     text = remove_brakets(text) # important to remove before we split into sentences
+    text = remove_symbols(text)
+    text = remove_brackets(text)
+
     sent_list = tokenize.sent_tokenize(text)
+    
     for i,item in enumerate(sent_list):
         clean_item = clean_text(item)
-        if len(clean_item) != 0: # disregard empty strings
+        check_text_for_symbols(clean_item)
+        if len(clean_item) != 0 and clean_item.isspace() == False: # disregard empty strings
             sent_list[i] = clean_item
     return sent_list
+
+
+def check_text_for_symbols(text):
+    if re.search(r'[\t,\\t]',text):
+        print("ERROR text has bad symbols {}".format(text))
+        quit()
 
 def add_sentences_of_blocks_to_db(block_db_idx):
     global sent_db
@@ -76,8 +87,8 @@ def add_sentences_of_blocks_to_db(block_db_idx):
 
         
 
-def split_par_to_blocks_keep_order(plane_par_db_idx):
-    par = plane_par_db.loc[plane_par_db_idx,'text']
+def split_par_to_blocks_keep_order(par_db_idx):
+    par = par_db.loc[par_db_idx,'text']
     startNum = par.count(defines.START_CHAR)
     endNum = par.count(defines.END_CHAR)
     block_list = [] # holds tupple ("tag", "block string")
@@ -86,7 +97,7 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
     splited = []
 
     if startNum == 0 and endNum == 0: # text is missing start and end symbols
-        if plane_par_db.loc[plane_par_db_idx,'is_nar'] == 0: #entire paragraph is not narrative
+        if par_db.loc[par_db_idx,'is_nar'] == 0: #entire paragraph is not narrative
             tag = "not_nar"
         else: #entire paragraph is narrative
             tag = "middle"
@@ -108,7 +119,7 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
             nar_blocks = re.findall(regex,outside_nar)
             for j,block in enumerate(nar_blocks):
                 if len(block) !=0:
-                    block_idx = get_index_of_block_in_par(splited_clean,block,plane_par_db_idx)
+                    block_idx = get_index_of_block_in_par(splited_clean,block,par_db_idx)
                     splited[block_idx] = "" # erase narrative blocks from splited paragraph
                     block_list.insert(block_idx,(tag,block))
             outside_nar = re.sub(regex,'',outside_nar)
@@ -118,28 +129,28 @@ def split_par_to_blocks_keep_order(plane_par_db_idx):
             if len(block)!=0:
                 if '%' in block:
                     continue # TBD handle story summary
-                block_idx = get_index_of_block_in_par(splited_clean,block,plane_par_db_idx)
+                block_idx = get_index_of_block_in_par(splited_clean,block,par_db_idx)
                 block_list.insert(block_idx,("not_nar",block))
     return block_list
 
-def get_index_of_block_in_par(splited,block,plane_par_db_idx):
-    block = clean_text(block)
-    if not block in splited:
-        print("{} \n par[{}]not in \n{}".format(plane_par_db_idx,block,splited))
+def get_index_of_block_in_par(splited,block,par_db_idx):
+    cl_block = clean_text(block)
+    if not cl_block in splited:
+        print("{} \n par[{}]not in \n{}".format(par_db_idx,cl_block,splited))
         return -1
     else:
-        return splited.index(block)
+        return splited.index(cl_block)
     
 
 def get_last_nar_idx_from_block_db():
     global block_db
     return block_db['nar_idx'].max()
 
-def add_blocks_of_par_to_db(plane_par_db_idx):
-    global plane_par_db, block_db
+def add_blocks_of_par_to_db(par_db_idx):
+    global par_db, block_db
     is_nar = 0
-    block_list = split_par_to_blocks_keep_order(plane_par_db_idx)
-    par_db_line = plane_par_db.iloc[plane_par_db_idx]
+    block_list = split_par_to_blocks_keep_order(par_db_idx)
+    par_db_line = par_db.iloc[par_db_idx]
     for i,tupple in enumerate(block_list):
         curr_db_idx = block_db.shape[0]
         curr_nar_idx = 0 if curr_db_idx == 0 else get_last_nar_idx_from_block_db() 
@@ -150,7 +161,7 @@ def add_blocks_of_par_to_db(plane_par_db_idx):
         block_db.loc[curr_db_idx,'is_nar'] = is_nar
         block_db.loc[curr_db_idx,'doc_idx'] = par_db_line['doc_idx']
         block_db.loc[curr_db_idx,'par_idx_in_doc'] = par_db_line['par_idx_in_doc']
-        block_db.loc[curr_db_idx,'par_db_idx'] = plane_par_db_idx
+        block_db.loc[curr_db_idx,'par_db_idx'] = par_db_idx
         block_db.loc[curr_db_idx,'par_type'] = par_db_line['par_type']
         block_db.loc[curr_db_idx,'block_type'] = tupple[0]
         block_db.loc[curr_db_idx,'nar_idx'] = curr_nar_idx if is_nar else 0
@@ -169,56 +180,70 @@ def save_df_to_csv(df_name, is_global = True):
         return 0
 
 
-def save_all_blocks():
-    global plane_par_db,block_db
-    for i in plane_par_db.index:
-        add_blocks_of_par_to_db(i)
-    save_df_to_csv(block_db)
-    print("All blocks saved")
 
-def save_all_sentences():
+def save_doc_blocks(doc_idx):
+    global par_db,block_db
+    block_db = pd.DataFrame()
+    par_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx)))
+    for i in par_db.index:
+        add_blocks_of_par_to_db(i)
+    del par_db
+    block_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx)),index=False)
+    del block_db
+    print("Doc {} blocks saved".format(doc_idx))
+
+def save_doc_sentences(doc_idx):
     global block_db, sent_db
+    sent_db = pd.DataFrame()
+    block_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx)))
     for i in block_db.index:
         add_sentences_of_blocks_to_db(i)
+    del block_db
     add_sent_column_for_labels()
-    save_df_to_csv(sent_db)
-    print("All sentences saved")
+    sent_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)),index=False)
+    del sent_db
+    print("Doc {} sentences saved".format(doc_idx))
 
-def split_doc_to_paragraphs(doc_idx):
-    global plane_par_db, doc_db
+def save_doc_paragraphs(doc_idx):
+    global par_db, doc_db
     inside_narrative = 0
     doc = docx.Document(doc_db.loc[doc_idx,'path'])
+    par_db = pd.DataFrame()
     for i,par in enumerate(doc.paragraphs):
-        curr_par_db_idx = plane_par_db.shape[0]
+        curr_par_db_idx = par_db.shape[0]
         text,par_type = get_par_type_erase(par.text)
         if len(text) == 0:
             continue
-        plane_par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
-        plane_par_db.loc[curr_par_db_idx,'text'] = text
-        plane_par_db.loc[curr_par_db_idx,'par_len'] = len(text)
-        plane_par_db.loc[curr_par_db_idx,'par_type'] = par_type
-        plane_par_db.loc[curr_par_db_idx,'par_idx_in_doc'] = i
+        par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
+        par_db.loc[curr_par_db_idx,'text'] = text
+        par_db.loc[curr_par_db_idx,'par_len'] = len(text)
+        par_db.loc[curr_par_db_idx,'par_type'] = par_type
+        par_db.loc[curr_par_db_idx,'par_idx_in_doc'] = i
         if defines.START_CHAR in par.text:
             inside_narrative = 1
-        plane_par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
+        par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
         if par.text.rfind(defines.END_CHAR) > par.text.rfind(defines.START_CHAR): # if [...# ] or [ ...&...#]
             inside_narrative = 0
+    par_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx)),index=False)
+    del par_db
     print("Doc {} paragraphs saved".format(doc_idx))
 
 def save_all_docs_paragraphs():
     global doc_db
     for doc_idx in doc_db.index:
-        split_doc_to_paragraphs(doc_idx)
+        save_doc_paragraphs(doc_idx)
 
 
 
 
 def save_docs_db():
     global doc_db
+    doc_db = pd.DataFrame()
     doc_path_list = get_labeled_files()
     for path in doc_path_list:
         add_doc_to_db(path)
-    save_df_to_csv(doc_db)
+    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
+
 
 def remove_punctuation(_text):
     text = _text.translate(str.maketrans('', '',string.punctuation))
@@ -240,15 +265,15 @@ def add_doc_to_db(path):
     doc_db.loc[doc_idx,'file_name'] = file_name
 
 def remove_brakets(text):
-    text = re.sub(r'\[.*?\]','',text) # remove " [brakets with text"]
-    return text
+    return re.sub(r'\(\..*?\)|\[.*?\]','',text)
 
 def clean_text(text):
     text,_ =  extract_narrative_summary(text)
-    text = remove_lr_annotation(text)
-    text = re.sub('\t','',text)
-    text=remove_punctuation(text)
+    text = remove_punctuation(text)
     return text
+
+def remove_symbols(text):
+    return re.sub(r'[@#&\*\t\\t]','',text)
 
 def extract_narrative_summary(text):
     summary = re.findall('%.*?%',text)
@@ -257,8 +282,8 @@ def extract_narrative_summary(text):
     return text,summary
 
 def remove_lr_annotation(text):
-    text = re.sub(r'\(L[0-9].*?-[A-Z]{1}\)','',text)
-    return text
+    return re.sub(r'\(L[0-9].*?\-[A-Z]{1}\)','',text)
+
 
 def get_par_type_erase(par):
     par_type = 'no_mark'
@@ -273,9 +298,10 @@ def get_par_type_erase(par):
 
 def get_all_data():
     save_docs_db()
-    save_all_docs_paragraphs()
-    save_all_blocks()
-    save_all_sentences()
+    for doc_idx in doc_db.index:
+        save_doc_paragraphs(doc_idx)
+        save_doc_blocks(doc_idx)
+        save_doc_sentences(doc_idx)
     
     
 

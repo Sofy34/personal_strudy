@@ -35,6 +35,9 @@ def check_text_for_illegal_labels(par):
         return 1
     return 0
 
+def get_doc_idx_from_name(file_name):
+    return int(file_name.split('_')[0])
+
 def add_sent_column_for_labels():
     global sent_db
     sent_db['sent_idx_in_nar'] =  sent_db[sent_db['is_nar']==1].groupby(['doc_idx','nar_idx']).cumcount()+1
@@ -47,9 +50,8 @@ def add_sent_column_for_labels():
 
 def split_block_to_sentences(text):
     text = remove_lr_annotation(text)
-    text = remove_brakets(text) # important to remove before we split into sentences
+    text = remove_brackets(text) # important to remove before we split into sentences
     text = remove_symbols(text)
-    text = remove_brackets(text)
 
     sent_list = tokenize.sent_tokenize(text)
     
@@ -242,7 +244,7 @@ def save_docs_db():
     doc_path_list = get_labeled_files()
     for path in doc_path_list:
         add_doc_to_db(path)
-    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
+    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=True)
 
 
 def remove_punctuation(_text):
@@ -260,11 +262,12 @@ def get_labeled_files():
 def add_doc_to_db(path):
     global doc_db
     file_name = os.path.basename(path)
-    doc_idx = doc_db.shape[0]
+    doc_idx = get_doc_idx_from_name(file_name)
+    print("doc idx {}".format(doc_idx))
     doc_db.loc[doc_idx,'path'] = path
     doc_db.loc[doc_idx,'file_name'] = file_name
 
-def remove_brakets(text):
+def remove_brackets(text):
     return re.sub(r'\(\..*?\)|\[.*?\]','',text)
 
 def clean_text(text):

@@ -15,8 +15,9 @@ from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
 import matplotlib.pyplot as plt
 import fasttext.util
-
-regressors = [
+regressors_instance = {}
+regressors_prediction = {}
+regressors_type = [
     LogisticRegression(random_state=0),
     LogisticRegressionCV(random_state=0),
     PassiveAggressiveClassifier(random_state=0),
@@ -28,7 +29,7 @@ regressors = [
     DecisionTreeClassifier(random_state=0)
 ]
 scores_df = pd.DataFrame(dtype=float)
-ft = fasttext.load_model('./external_src/cc.he.300.bin')
+# ft = fasttext.load_model('./external_src/cc.he.300.bin')
 
 def get_vector_per_sentence(db, dim = 300):
     global ft
@@ -244,7 +245,11 @@ def get_cross_val_score(estimator,X_train,y_train,prefix="",sampler=None):
             n_jobs = -1
         )
         add_score(full_scores, estimator.__class__.__name__,prefix)
-        
+
+def save_estimator(estimator):
+    global regressors_instance
+    regressors_instance[estimator.__class__.__name__] = estimator
+
 def add_score(scores, regressorName, dataType):
     global scores_df
     scores_df.loc[regressorName + '_' + dataType, 'f1'] = scores['test_f1'].mean()
@@ -253,7 +258,16 @@ def add_score(scores, regressorName, dataType):
     scores_df.loc[regressorName + '_' + dataType, 'average_precision'] = scores['test_average_precision'].mean()
 
 
-def run_on_all_regerssors(X_train,y_train,feature_set):
+def cross_val_all_regerssors(X_train,y_train,feature_set):
     global scores_df
-    for regr in regressors:
+    for regr in regressors_type:
         get_cross_val_score(regr, X_train, y_train,feature_set)
+
+def fit_predict_all_regressors(X_train,y_train,X_test):
+    global regressors_type
+    global regr_result_db
+    for reg_type  in regressors_type:
+        regr = reg_type
+        regr.fit(X_train,y_train)
+        save_estimator(regr)
+        regressors_prediction[regr.__class__.__name__]= regr.predict(X_test)

@@ -29,7 +29,7 @@ regressors_type = [
     DecisionTreeClassifier(random_state=0)
 ]
 scores_df = pd.DataFrame(dtype=float)
-# ft = fasttext.load_model('./external_src/cc.he.300.bin')
+ft = fasttext.load_model('./external_src/cc.he.300.bin')
 
 def get_vector_per_sentence(db, dim = 300):
     global ft
@@ -271,3 +271,4 @@ def fit_predict_all_regressors(X_train,y_train,X_test):
         regr.fit(X_train,y_train)
         save_estimator(regr)
         regressors_prediction[regr.__class__.__name__]= regr.predict(X_test)
+

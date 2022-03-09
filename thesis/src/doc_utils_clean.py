@@ -186,23 +186,25 @@ def save_df_to_csv(df_name, is_global = True):
 def save_doc_blocks(doc_idx):
     global par_db,block_db
     block_db = pd.DataFrame()
-    par_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx)))
+    doc_idx_from_name = doc_db.loc[doc_idx,'doc_idx_from_name']
+    par_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx_from_name)))
     for i in par_db.index:
         add_blocks_of_par_to_db(i)
     del par_db
-    block_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx)),index=False)
+    block_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx_from_name)),index=False)
     del block_db
     print("Doc {} blocks saved".format(doc_idx))
 
 def save_doc_sentences(doc_idx):
     global block_db, sent_db
     sent_db = pd.DataFrame()
-    block_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx)))
+    doc_idx_from_name = doc_db.loc[doc_idx,'doc_idx_from_name']
+    block_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx_from_name)))
     for i in block_db.index:
         add_sentences_of_blocks_to_db(i)
     del block_db
     add_sent_column_for_labels()
-    sent_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)),index=False)
+    sent_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx_from_name)),index=False)
     del sent_db
     print("Doc {} sentences saved".format(doc_idx))
 
@@ -211,12 +213,13 @@ def save_doc_paragraphs(doc_idx):
     inside_narrative = 0
     doc = docx.Document(doc_db.loc[doc_idx,'path'])
     par_db = pd.DataFrame()
+    doc_idx_from_name = doc_db.loc[doc_idx,'doc_idx_from_name']
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = par_db.shape[0]
         text,par_type = get_par_type_erase(par.text)
         if len(text) == 0:
             continue
-        par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx
+        par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx_from_name
         par_db.loc[curr_par_db_idx,'text'] = text
         par_db.loc[curr_par_db_idx,'par_len'] = len(text)
         par_db.loc[curr_par_db_idx,'par_type'] = par_type
@@ -226,7 +229,7 @@ def save_doc_paragraphs(doc_idx):
         par_db.loc[curr_par_db_idx,'is_nar'] = inside_narrative
         if par.text.rfind(defines.END_CHAR) > par.text.rfind(defines.START_CHAR): # if [...# ] or [ ...&...#]
             inside_narrative = 0
-    par_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx)),index=False)
+    par_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx_from_name)),index=False)
     del par_db
     print("Doc {} paragraphs saved".format(doc_idx))
 
@@ -244,7 +247,8 @@ def save_docs_db():
     doc_path_list = get_labeled_files()
     for path in doc_path_list:
         add_doc_to_db(path)
-    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=True)
+    doc_db['doc_idx_from_name'] = doc_db['doc_idx_from_name'].astype(int)
+    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
 
 
 def remove_punctuation(_text):
@@ -262,10 +266,11 @@ def get_labeled_files():
 def add_doc_to_db(path):
     global doc_db
     file_name = os.path.basename(path)
-    doc_idx = get_doc_idx_from_name(file_name)
-    print("doc idx {}".format(doc_idx))
-    doc_db.loc[doc_idx,'path'] = path
-    doc_db.loc[doc_idx,'file_name'] = file_name
+    doc_db_idx = doc_db.shape[0]
+    doc_idx_from_name = get_doc_idx_from_name(file_name)
+    doc_db.loc[doc_db_idx,'path'] = path
+    doc_db.loc[doc_db_idx,'file_name'] = file_name
+    doc_db.loc[doc_db_idx,'doc_idx_from_name'] = doc_idx_from_name
 
 def remove_brackets(text):
     return re.sub(r'\(\..*?\)|\[.*?\]','',text)

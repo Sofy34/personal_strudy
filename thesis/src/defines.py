@@ -6,6 +6,9 @@ THERAPIST_HEB = "מטפל"
 CLIENT_HEB = "קליינט"
 SEGMENT_HEB = "סגמנט"
 PATH_TO_DFS = "dataframes"
+CRF_SEQ_LEN=6
+CRF_SEQ_STEP=6
+CRF_NEIGHBOR_RADIUS=2
 YAP_TAG_DICT = {
 'POS_TAGS_DICT' : {
 'AGR-gn' : 'Agreement particle',

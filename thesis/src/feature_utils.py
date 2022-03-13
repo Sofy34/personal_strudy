@@ -15,6 +15,12 @@ from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from sklearn.metrics import classification_report, confusion_matrix, plot_confusion_matrix
 import matplotlib.pyplot as plt
 import fasttext.util
+import os
+from sklearn.metrics.pairwise import cosine_similarity
+import glob
+from scipy import sparse
+import json
+
 regressors_instance = {}
 regressors_prediction = {}
 regressors_type = [
@@ -31,6 +37,15 @@ regressors_type = [
 scores_df = pd.DataFrame(dtype=float)
 ft = fasttext.load_model('./external_src/cc.he.300.bin')
 
+
+### EMBEDDED VECTORS ###
+
+def get_and_save_sent_vectors(doc_idx,dim = 300): 
+    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)))
+    sent_vec_db = get_vector_per_sentence(sent_db,dim)
+    sent_vec_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_vec{}_db.csv".format(doc_idx,dim)),index=False)
+    print("{} doc sent saved".format(doc_idx,dim))
+
 def get_vector_per_sentence(db, dim = 300):
     global ft
     if (dim < 300):
@@ -39,6 +54,248 @@ def get_vector_per_sentence(db, dim = 300):
     # sent_array = np.vstack(sent_vectors)
     sent_vec_db = pd.DataFrame(sent_vectors)
     return sent_vec_db
+
+def get_and_save_doc_similarity(doc_idx,dim = 300): 
+    sent_vec_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_vec{}_db.csv".format(doc_idx,dim)))
+    sim_db = pd.DataFrame(cosine_similarity(sent_vec_db))
+    sim_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_sim_vec{}_db.csv".format(doc_idx,dim)),index=False)
+    print("{} sim_db sent saved".format(doc_idx))
+
+#########################
+
+### STOP WORDS RATE ###
+def count_stop_words_per_sent(sentence):
+    words =  tokenize.word_tokenize(sentence)
+    sent_stop_words = [w for w in words if w in stop_words]
+    rate = len(sent_stop_words)/len(words)
+    return rate
+
+def get_stop_words_rate(doc_idx):
+    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)))
+    for i in sent_db.index:
+        sent_db.loc[i,'stop_words_rate'] = count_stop_words_per_sent(i)
+
+#########################
+
+### TF-IDF ###
+
+def get_all_docs_lemma():
+    all_docs_lemma = pd.concat(map(pd.read_csv, glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))),axis=0)
+    all_docs_lemma.reset_index(inplace=True)
+    return all_docs_lemma
+
+def tfidf_transform_doc(doc_idx,tfidf):
+    sent_lemma_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_lemma_db.csv".format(doc_idx)))
+    doc_lemmas = sent_lemma_db['sent_lemma'].tolist()
+    return tfidf.transform(doc_lemmas)
+
+
+def tfidf_fit():
+    all_docs_lemma = get_all_docs_lemma()
+    tfidf = TfidfVectorizer(lowercase=False)
+    return tfidf.fit(all_docs_lemma['sent_lemma'].tolist())
+
+def tfidf_build():
+    vocab = tfidf_fit()
+    sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))
+    for i,doc_name in enumerate(sent_lemma_db_list):
+        doc_prefix = get_doc_idx_from_name(doc_name)
+        X = tfidf_transform_doc(doc_prefix,vocab)
+        sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf.npz".format(doc_prefix)), X)
+        print("TfIdf {} saved".format(doc_prefix))
+
+
+
+
+
+#########################
+
+## POS from YAP ###
+
+def get_and_save_sent_lemma_db(doc_idx):
+    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx))
+    sent_pos_db = pd.read_csv(doc_name,usecols=['sent_idx','LEMMA'])
+    sent_lemma_db = pd.DataFrame()
+    sent_lemma_db['sent_lemma'] = sent_pos_db.groupby('sent_idx')['LEMMA'].apply(lambda x: "%s" % ' '.join(x)).tolist()
+    sent_lemma_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_lemma_db.csv".format(doc_idx)),index=False)
+    print("{} sent lemma db saved".format(doc_idx))
+
+
+
+def get_and_save_sent_pos_count_db(doc_idx):
+    columns_to_count = ['POSTAG','f_gen','f_num','f_suf_gen','f_suf_num','f_suf_per','f_per','f_tense']
+    sent_pos_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx)))
+    sent_pos_dummies = pd.get_dummies(sent_pos_db,columns=columns_to_count)
+    sent_pos_dummies.fillna(value=0,inplace=True)
+    count_db = sent_pos_dummies.groupby('sent_idx').sum()
+    count_db['TOKEN'] = sent_pos_dummies.groupby('sent_idx')['TOKEN'].max()
+    count_db.drop(['FROM','TO','doc_idx'],inplace=True,axis=1)
+    count_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_count_db.csv".format(doc_idx)),index=False)
+    print("{} sent count db saved".format(doc_idx))
+
+#########################
+
+### Merge all sentense features into single DB ###
+def merge_sent_pos_db(doc_idx):
+    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)),usecols=['is_nar','is_client','sent_len'])
+    count_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_count_db.csv".format(doc_idx)))
+    merged_db =  pd.merge(sent_db,count_db, left_index=True,right_index=True,validate="one_to_one")
+    merged_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_features_db.csv".format(doc_idx)),index=False)
+    print("{} sent features db saved".format(doc_idx))
+
+#########################
+
+### Pack sentense features for CRF  ###
+
+curr_doc_db = {}
+def load_doc_features(doc_idx):
+    global curr_doc_db
+    curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx)))
+    curr_doc_db['sim_vec']  = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_sim_vec300_db.csv".format(doc_idx)))
+    curr_doc_db['tfidf'] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf.npz".format(doc_idx)))
+    return curr_doc_db
+
+def save_doc_packed_features(doc_idx,dictionary_data):
+    j_file = open(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_packed_dict.csv".format(doc_idx)), "w")
+    json.dump(dictionary_data, j_file)
+    print("{} packed features saved".format(doc_idx))
+    j_file.close()
+
+
+
+def pack_doc_features(doc_idx,seq_len = 6,step = 6):
+    X_doc = [doc2features(first_sent_idx) for first_sent_idx in curr_doc_db['merged'].index[:-seq_len:step]] # TBD take last indices as well
+    # save_doc_packed_features(doc_idx,X_doc) #TBD open after solve 'Object of type int64 is not JSON serializable'
+    y_doc = [doc2labels(first_sent_idx) for first_sent_idx in curr_doc_db['merged'].index[:-seq_len:step]]
+    groups_doc =  [doc_idx for i in range(len(y_doc))]
+    return X_doc,y_doc,groups_doc
+
+def pack_all_doc_features(seq_len = 6,step = 6):
+    X = []
+    y = []
+    groups = []
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    if os.path.isfile(doc_db_path):
+        doc_db = pd.read_csv(doc_db_path)
+    for doc_idx in doc_db.doc_idx_from_name:
+        load_doc_features(doc_idx)
+        X_doc,y_doc,groups_doc =  pack_doc_features(doc_idx)
+        X.extend(X_doc)
+        y.extend(y_doc)
+        groups.extend(groups_doc)
+        
+    print("Features packed for {} docs".format(len(doc_db.index)))
+    return X,y,groups
+
+def pack_doc_sentences(doc_idx):
+    doc_len =  len(curr_doc_db['merged'].index)
+    X_doc = [sent2features(sent_idx,sent_idx,doc_len) for sent_idx in curr_doc_db['merged'].index] 
+    # save_doc_packed_features(doc_idx,X_doc) #TBD open after solve 'Object of type int64 is not JSON serializable'
+    y_doc = [sent2label(sent_idx) for sent_idx in curr_doc_db['merged'].index]
+    groups_doc =  [doc_idx for i in range(len(y_doc))]
+    print ("{} doc {} sentences packed".format(doc_idx,doc_len))
+    return X_doc,y_doc,groups_doc
+
+def reshape_doc_features_to_sequence(X,y,groups,seq_len,step):
+    X_seq = [X[i : i+seq_len] for i in np.arange(0,len(X),step)]
+    y_seq = [y[i : i+seq_len] for i in np.arange(0,len(y),step)]
+    groups_seq = groups[::step]
+    print ("{} doc sentences reshaped: from {} to {}".format(groups_seq[0],len(X),len(X_seq)))
+    return X_seq,y_seq,groups_seq
+
+def pack_reshape_all_doc_sentences(seq_len,step):
+    X = []
+    y = []
+    groups = []
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    if os.path.isfile(doc_db_path):
+        doc_db = pd.read_csv(doc_db_path)
+    for doc_idx in doc_db.doc_idx_from_name:
+        load_doc_features(doc_idx)
+        X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx)
+        X_seq,y_seq,groups_seq = reshape_doc_features_to_sequence(X_doc,y_doc,groups_doc,seq_len,step)
+        X.extend(X_seq)
+        y.extend(y_seq)
+        groups.extend(groups_seq)
+        
+    print("Sentenced packed for {} docs".format(len(doc_db.index)))
+    return X,y,groups
+
+def pack_all_doc_sentences():
+    X = []
+    y = []
+    groups = []
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    if os.path.isfile(doc_db_path):
+        doc_db = pd.read_csv(doc_db_path)
+    for doc_idx in doc_db.doc_idx_from_name:
+        load_doc_features(doc_idx)
+        X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx)
+        X.extend(X_doc)
+        y.extend(y_doc)
+        groups.extend(groups_doc)
+        
+    print("{} sentenced packed for {} docs".format(len(X),len(doc_db.index)))
+    return X,y,groups
+
+def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start_idx = 1):
+    global curr_doc_db
+    features = {}
+    for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+        features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col]
+
+    if idx_in_seq > 1:
+        update = {}
+        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+            update["-1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-1,col]
+        features.update(update)
+
+    
+    if idx_in_seq > 2:
+        update = {}
+        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+            update["-2:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-2,col]
+        features.update(update)
+    
+    update = {}
+    for neighbor_dist in range(1,neighbor_radius+1):
+        if idx_in_seq > neighbor_dist - 1:
+            update["-{}.sim".format(neighbor_dist)]=curr_doc_db['sim_vec'].iloc[sent_idx,sent_idx-neighbor_dist]
+        if idx_in_seq < seq_len - neighbor_dist:
+            update["+{}.sim".format(neighbor_dist)]=curr_doc_db['sim_vec'].iloc[sent_idx,sent_idx+neighbor_dist]
+
+    features.update(update) 
+    
+    update = {}
+    tfidf_feature_indices = curr_doc_db['tfidf'][sent_idx,:].nonzero()[1]
+    for i in tfidf_feature_indices:
+        update["tf_{}".format(i)] = curr_doc_db['tfidf'][sent_idx,i]
+    features.update(update)
+
+    
+    if idx_in_seq < seq_len-1:
+        update = {}
+        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+            update["+1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx+1,col]
+        features.update(update)
+
+
+    return features
+
+def sent2label(sent_idx):
+    return "{}".format(curr_doc_db['merged'].loc[sent_idx,'is_nar'].astype(bool))
+
+
+def doc2features(first_sent_idx,seq_len=6,seq_step=6):
+    return [sent2features(sent_idx,idx_in_seq) for idx_in_seq,sent_idx in enumerate(np.arange(first_sent_idx,first_sent_idx+seq_len,dtype=int))]
+def doc2labels(first_sent_idx,seq_len=6,seq_step=6):
+    return [sent2label(sent_idx) for sent_idx in range(first_sent_idx,first_sent_idx+seq_len)]
+
+#########################
+
+def get_doc_idx_from_name(file_name):
+    base_name = os.path.basename(file_name)
+    return int(base_name.split('_')[0])
 
 def get_num_text_union(df):
     numeric_cols = df.columns[df.columns.dtype != object].tolist()

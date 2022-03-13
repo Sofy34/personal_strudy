@@ -264,13 +264,25 @@ def get_labeled_files():
 
 
 def add_doc_to_db(path):
-    global doc_db
+    if not s.path.isfile(path):
+        print ("ERROR: file {} does not exists".format(path))
+        return
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    if os.path.isfile(doc_db_path):
+        doc_db = pd.read_csv(doc_db_path)
+    else:
+        print ("Creating doc_db")
+        doc_db_path = pd.DataFrame()
     file_name = os.path.basename(path)
     doc_db_idx = doc_db.shape[0]
     doc_idx_from_name = get_doc_idx_from_name(file_name)
-    doc_db.loc[doc_db_idx,'path'] = path
-    doc_db.loc[doc_db_idx,'file_name'] = file_name
-    doc_db.loc[doc_db_idx,'doc_idx_from_name'] = doc_idx_from_name
+    if doc_idx_from_name in doc_db['doc_idx_from_name']:
+        print ("ERROR: doc {} already saved".format(path))
+        return
+    else:
+        doc_db.loc[doc_db_idx,'path'] = path
+        doc_db.loc[doc_db_idx,'file_name'] = file_name
+        doc_db.loc[doc_db_idx,'doc_idx_from_name'] = doc_idx_from_name
 
 def remove_brackets(text):
     return re.sub(r'\(\..*?\)|\[.*?\]','',text)
@@ -299,7 +311,7 @@ def get_par_type_erase(par):
         par = re.sub('CLIENT(:)', '',par)
         par_type = 'client'
     if 'THERAPIST' in par[:20]: # search for a tag in the begginning of a line
-        par = re.sub('THERAPIST(:)', '',par)
+        par = re.sub('THERAPIST(.*?:)', '',par)
         par_type= 'therapist'
     check_text_for_illegal_labels(par)
     return par,par_type
@@ -307,10 +319,20 @@ def get_par_type_erase(par):
 def get_all_data():
     save_docs_db()
     for doc_idx in doc_db.index:
+        parse_doc(doc_idx)
+    
+    
+def parse_doc(doc_idx):
         save_doc_paragraphs(doc_idx)
         save_doc_blocks(doc_idx)
         save_doc_sentences(doc_idx)
-    
-    
+
+def add_new_doc(path):
+    doc_prefix = int(os.path.basename(doc_name).split("_")[0])
+    doc_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"))
+    if doc_prefix in doc_db['doc_idx_from_name']:
+        print( "Doc {} already parsed".format(path))
+    else:
+        add_doc_to_db(path)
 
 

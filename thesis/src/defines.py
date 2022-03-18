@@ -9,6 +9,8 @@ PATH_TO_DFS = "dataframes"
 CRF_SEQ_LEN=6
 CRF_SEQ_STEP=6
 CRF_NEIGHBOR_RADIUS=2
+DOC_DB_PATH = {PATH_TO_DFS,"/","doc_db.csv"}
+
 YAP_TAG_DICT = {
 'POS_TAGS_DICT' : {
 'AGR-gn' : 'Agreement particle',

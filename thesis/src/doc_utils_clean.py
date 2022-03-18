@@ -183,22 +183,20 @@ def save_df_to_csv(df_name, is_global = True):
 
 
 
-def save_doc_blocks(doc_idx):
+def save_doc_blocks(doc_idx_from_name):
     global par_db,block_db
     block_db = pd.DataFrame()
-    doc_idx_from_name = doc_db.loc[doc_idx,'doc_idx_from_name']
     par_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx_from_name)))
     for i in par_db.index:
         add_blocks_of_par_to_db(i)
     del par_db
     block_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx_from_name)),index=False)
     del block_db
-    print("Doc {} blocks saved".format(doc_idx))
+    print("Doc {} blocks saved".format(doc_idx_from_name))
 
-def save_doc_sentences(doc_idx):
+def save_doc_sentences(doc_idx_from_name):
     global block_db, sent_db
     sent_db = pd.DataFrame()
-    doc_idx_from_name = doc_db.loc[doc_idx,'doc_idx_from_name']
     block_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx_from_name)))
     for i in block_db.index:
         add_sentences_of_blocks_to_db(i)
@@ -206,14 +204,20 @@ def save_doc_sentences(doc_idx):
     add_sent_column_for_labels()
     sent_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx_from_name)),index=False)
     del sent_db
-    print("Doc {} sentences saved".format(doc_idx))
+    print("Doc {} sentences saved".format(doc_idx_from_name))
 
-def save_doc_paragraphs(doc_idx):
+def save_doc_paragraphs(doc_idx_from_name):
     global par_db, doc_db
     inside_narrative = 0
-    doc = docx.Document(doc_db.loc[doc_idx,'path'])
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    doc_db = pd.read_csv(doc_db_path)
+    doc_path = doc_db.loc[doc_db['doc_idx_from_name']==doc_idx_from_name,'path'].values[0]
+    if os.path.isfile(doc_path):
+        doc = docx.Document(doc_path)
+    else:
+        print("Error: doc {} does not exist".format(doc_idx_from_name))
+        return
     par_db = pd.DataFrame()
-    doc_idx_from_name = doc_db.loc[doc_idx,'doc_idx_from_name']
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = par_db.shape[0]
         text,par_type = get_par_type_erase(par.text)
@@ -231,7 +235,7 @@ def save_doc_paragraphs(doc_idx):
             inside_narrative = 0
     par_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx_from_name)),index=False)
     del par_db
-    print("Doc {} paragraphs saved".format(doc_idx))
+    print("Doc {} paragraphs saved".format(doc_idx_from_name))
 
 def save_all_docs_paragraphs():
     global doc_db
@@ -258,13 +262,13 @@ def remove_punctuation(_text):
 
 def get_labeled_files():
     doc_path_list = []
-    for file in glob.glob("./tmp/*_lc.docx"): # _lc is name pattern of labeled cleaned *.docx files
+    for file in glob.glob("./tmp/*.docx"): # _lc is name pattern of labeled cleaned *.docx files
         doc_path_list.append(file)
     return doc_path_list
 
 
 def add_doc_to_db(path):
-    if not s.path.isfile(path):
+    if not os.path.isfile(path):
         print ("ERROR: file {} does not exists".format(path))
         return
     doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
@@ -283,6 +287,7 @@ def add_doc_to_db(path):
         doc_db.loc[doc_db_idx,'path'] = path
         doc_db.loc[doc_db_idx,'file_name'] = file_name
         doc_db.loc[doc_db_idx,'doc_idx_from_name'] = doc_idx_from_name
+    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
 
 def remove_brackets(text):
     return re.sub(r'\(\..*?\)|\[.*?\]','',text)
@@ -308,7 +313,7 @@ def remove_lr_annotation(text):
 def get_par_type_erase(par):
     par_type = 'no_mark'
     if 'CLIENT' in par[:20]: # search for a tag in the begginning of a line
-        par = re.sub('CLIENT(:)', '',par)
+        par = re.sub('CLIENT(.*?:)', '',par)
         par_type = 'client'
     if 'THERAPIST' in par[:20]: # search for a tag in the begginning of a line
         par = re.sub('THERAPIST(.*?:)', '',par)
@@ -323,12 +328,12 @@ def get_all_data():
     
     
 def parse_doc(doc_idx):
-        save_doc_paragraphs(doc_idx)
-        save_doc_blocks(doc_idx)
-        save_doc_sentences(doc_idx)
+    save_doc_paragraphs(doc_idx)
+    save_doc_blocks(doc_idx)
+    save_doc_sentences(doc_idx)
 
 def add_new_doc(path):
-    doc_prefix = int(os.path.basename(doc_name).split("_")[0])
+    doc_prefix = int(os.path.basename(path).split("_")[0])
     doc_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"))
     if doc_prefix in doc_db['doc_idx_from_name']:
         print( "Doc {} already parsed".format(path))

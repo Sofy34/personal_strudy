@@ -95,7 +95,7 @@ def tfidf_fit():
     tfidf = TfidfVectorizer(lowercase=False)
     return tfidf.fit(all_docs_lemma['sent_lemma'].tolist())
 
-def tfidf_build():
+def tfidf_build_all_save_per_doc():
     vocab = tfidf_fit()
     sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))
     for i,doc_name in enumerate(sent_lemma_db_list):
@@ -114,6 +114,9 @@ def tfidf_build():
 
 def get_and_save_sent_lemma_db(doc_idx):
     doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx))
+    if not os.path.isfile(doc_name):
+        print("ERROR: {} does not exists".format(doc_name))
+        return
     sent_pos_db = pd.read_csv(doc_name,usecols=['sent_idx','LEMMA'])
     sent_lemma_db = pd.DataFrame()
     sent_lemma_db['sent_lemma'] = sent_pos_db.groupby('sent_idx')['LEMMA'].apply(lambda x: "%s" % ' '.join(x)).tolist()
@@ -138,9 +141,9 @@ def get_and_save_sent_pos_count_db(doc_idx):
 ### Merge all sentense features into single DB ###
 def merge_sent_pos_db(doc_idx):
     sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)),usecols=['is_nar','is_client','sent_len'])
-    count_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_count_db.csv".format(doc_idx)))
+    count_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_count_db.csv".format(doc_idx)))
     merged_db =  pd.merge(sent_db,count_db, left_index=True,right_index=True,validate="one_to_one")
-    merged_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_features_db.csv".format(doc_idx)),index=False)
+    merged_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx)),index=False)
     print("{} sent features db saved".format(doc_idx))
 
 #########################
@@ -174,10 +177,13 @@ def pack_all_doc_features(seq_len = 6,step = 6):
     X = []
     y = []
     groups = []
-    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
-    if os.path.isfile(doc_db_path):
-        doc_db = pd.read_csv(doc_db_path)
-    for doc_idx in doc_db.doc_idx_from_name:
+    # doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    # if os.path.isfile(doc_db_path):
+    #     doc_db = pd.read_csv(doc_db_path)
+    merged_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_merged_db.csv"))
+    merged_db_list.sort()
+    for doc_name in merged_db_list:
+        doc_idx = get_doc_idx_from_name(doc_name)
         load_doc_features(doc_idx)
         X_doc,y_doc,groups_doc =  pack_doc_features(doc_idx)
         X.extend(X_doc)
@@ -225,17 +231,19 @@ def pack_all_doc_sentences():
     X = []
     y = []
     groups = []
-    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
-    if os.path.isfile(doc_db_path):
-        doc_db = pd.read_csv(doc_db_path)
-    for doc_idx in doc_db.doc_idx_from_name:
+    sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))
+    # doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    # if os.path.isfile(doc_db_path):
+    #     doc_db = pd.read_csv(doc_db_path)
+    for doc_name in sent_lemma_db_list:
+        doc_idx = get_doc_idx_from_name(doc_name)
         load_doc_features(doc_idx)
         X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx)
         X.extend(X_doc)
         y.extend(y_doc)
         groups.extend(groups_doc)
         
-    print("{} sentenced packed for {} docs".format(len(X),len(doc_db.index)))
+    print("{} sentenced packed for {} docs".format(len(X),len(sent_lemma_db_list)))
     return X,y,groups
 
 def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start_idx = 1):
@@ -529,3 +537,17 @@ def fit_predict_all_regressors(X_train,y_train,X_test):
         save_estimator(regr)
         regressors_prediction[regr.__class__.__name__]= regr.predict(X_test)
 
+### Get all possible features of document after pasring ###
+def save_doc_features(doc_idx):
+    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx))
+    if not os.path.isfile(doc_name):
+        print("ERROR: {} does not exists".format(doc_name))
+        return
+    get_and_save_sent_lemma_db(doc_idx)
+    get_and_save_sent_pos_count_db(doc_idx)
+    merge_sent_pos_db(doc_idx)
+    get_and_save_sent_vectors(doc_idx)
+    get_and_save_doc_similarity(doc_idx)
+
+
+######

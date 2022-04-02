@@ -90,18 +90,29 @@ def tfidf_transform_doc(doc_idx,tfidf):
     return tfidf.transform(doc_lemmas)
 
 
-def tfidf_fit():
+def tfidf_fit(per_word = True, n_min = 3, n_max = 5, min_df = 5):
     all_docs_lemma = get_all_docs_lemma()
-    tfidf = TfidfVectorizer(lowercase=False)
+    if per_word:
+        tfidf = TfidfVectorizer(lowercase=False)
+    else:
+        tfidf = TfidfVectorizer(lowercase=False,
+        ngram_range = (n_min,n_max),
+        min_df = min_df
+        )
     return tfidf.fit(all_docs_lemma['sent_lemma'].tolist())
 
-def tfidf_build_all_save_per_doc():
-    vocab = tfidf_fit()
+def tfidf_build_all_save_per_doc(per_word = True):
+    vocab = tfidf_fit(per_word)
+    tf_string = ""
+    if per_word:
+        tf_string = "word"
+    else:
+        tf_string = "char"
     sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))
     for i,doc_name in enumerate(sent_lemma_db_list):
         doc_prefix = get_doc_idx_from_name(doc_name)
         X = tfidf_transform_doc(doc_prefix,vocab)
-        sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf.npz".format(doc_prefix)), X)
+        sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf_{}.npz".format(doc_prefix,tf_string)), X)
         print("TfIdf {} saved".format(doc_prefix))
 
 
@@ -155,7 +166,8 @@ def load_doc_features(doc_idx):
     global curr_doc_db
     curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx)))
     curr_doc_db['sim_vec']  = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_sim_vec300_db.csv".format(doc_idx)))
-    curr_doc_db['tfidf'] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf.npz".format(doc_idx)))
+    curr_doc_db['tfidf_word'] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf_word.npz".format(doc_idx)))
+    curr_doc_db['tfidf_char'] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf_char.npz".format(doc_idx)))
     return curr_doc_db
 
 def save_doc_packed_features(doc_idx,dictionary_data):
@@ -206,7 +218,7 @@ def reshape_doc_features_to_sequence(X,y,groups,seq_len,step):
     X_seq = [X[i : i+seq_len] for i in np.arange(0,len(X),step)]
     y_seq = [y[i : i+seq_len] for i in np.arange(0,len(y),step)]
     groups_seq = groups[::step]
-    print ("{} doc sentences reshaped: from {} to {}".format(groups_seq[0],len(X),len(X_seq)))
+    print ("doc sentences reshaped: from {} to {}".format(len(X),len(X_seq)))
     return X_seq,y_seq,groups_seq
 
 def pack_reshape_all_doc_sentences(seq_len,step):
@@ -236,12 +248,13 @@ def pack_all_doc_sentences():
     # if os.path.isfile(doc_db_path):
     #     doc_db = pd.read_csv(doc_db_path)
     for doc_name in sent_lemma_db_list:
-        doc_idx = get_doc_idx_from_name(doc_name)
+        doc_idx = get_doc_idx_from_name(doc_name) 
         load_doc_features(doc_idx)
         X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx)
         X.extend(X_doc)
         y.extend(y_doc)
         groups.extend(groups_doc)
+        print("Doc {} sentenced packed".format(doc_idx))
         
     print("{} sentenced packed for {} docs".format(len(X),len(sent_lemma_db_list)))
     return X,y,groups
@@ -250,19 +263,22 @@ def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start
     global curr_doc_db
     features = {}
     for col in curr_doc_db['merged'].columns[columns_start_idx:]:
-        features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col]
+        if curr_doc_db['merged'].loc[sent_idx,col]!=0:
+            features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col]
 
     if idx_in_seq > 1:
         update = {}
         for col in curr_doc_db['merged'].columns[columns_start_idx:]:
-            update["-1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-1,col]
+            if curr_doc_db['merged'].loc[sent_idx-1,col]!=0:
+                update["-1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-1,col]
         features.update(update)
 
     
     if idx_in_seq > 2:
         update = {}
         for col in curr_doc_db['merged'].columns[columns_start_idx:]:
-            update["-2:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-2,col]
+            if curr_doc_db['merged'].loc[sent_idx-2,col] !=0:
+                update["-2:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-2,col]
         features.update(update)
     
     update = {}
@@ -275,16 +291,24 @@ def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start
     features.update(update) 
     
     update = {}
-    tfidf_feature_indices = curr_doc_db['tfidf'][sent_idx,:].nonzero()[1]
+    tfidf_feature_indices = curr_doc_db['tfidf_word'][sent_idx,:].nonzero()[1]
     for i in tfidf_feature_indices:
-        update["tf_{}".format(i)] = curr_doc_db['tfidf'][sent_idx,i]
+        update["tf_word_{}".format(i)] = curr_doc_db['tfidf_word'][sent_idx,i]
     features.update(update)
+
+    if 'tfidf_char' in curr_doc_db.keys():
+        update = {}
+        tfidf_feature_indices = curr_doc_db['tfidf_char'][sent_idx,:].nonzero()[1]
+        for i in tfidf_feature_indices:
+            update["tf_char_{}".format(i)] = curr_doc_db['tfidf_char'][sent_idx,i]
+        features.update(update)
 
     
     if idx_in_seq < seq_len-1:
         update = {}
         for col in curr_doc_db['merged'].columns[columns_start_idx:]:
-            update["+1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx+1,col]
+            if curr_doc_db['merged'].loc[sent_idx+1,col]!=0:
+                update["+1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx+1,col]
         features.update(update)
 
 
@@ -539,7 +563,7 @@ def fit_predict_all_regressors(X_train,y_train,X_test):
 
 ### Get all possible features of document after pasring ###
 def save_doc_features(doc_idx):
-    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx))
+    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx))
     if not os.path.isfile(doc_name):
         print("ERROR: {} does not exists".format(doc_name))
         return

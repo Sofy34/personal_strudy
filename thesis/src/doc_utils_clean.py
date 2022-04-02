@@ -24,6 +24,9 @@ def get_random_paragraph(query):
     match =  par_db.query(query)
     return match.sample()
 
+def text_contains_char(text):
+    has_char = re.search(r'[a-z,A-Z,א-ת]',text)
+    return has_char
 
 def check_text_for_illegal_labels(par):
         # capture if there is [start:start] or [end:end]
@@ -74,6 +77,9 @@ def add_sentences_of_blocks_to_db(block_db_idx):
     block = block_line['text']
     sent_list = split_block_to_sentences(block)
     for i,sentence in enumerate(sent_list):
+        if not text_contains_char(sentence):
+            print("Sentence wihtout char! \n {}".format(sentence))
+            continue
         curr_db_idx = sent_db.shape[0]
         sent_db.loc[curr_db_idx,'text'] = sentence
         sent_db.loc[curr_db_idx,'sent_idx_in_block'] = i
@@ -280,7 +286,7 @@ def add_doc_to_db(path):
     file_name = os.path.basename(path)
     doc_db_idx = doc_db.shape[0]
     doc_idx_from_name = get_doc_idx_from_name(file_name)
-    if doc_idx_from_name in doc_db['doc_idx_from_name']:
+    if doc_idx_from_name in doc_db['doc_idx_from_name'].values:
         print ("ERROR: doc {} already saved".format(path))
         return
     else:
@@ -335,8 +341,8 @@ def parse_doc(doc_idx):
 def add_new_doc(path):
     doc_prefix = int(os.path.basename(path).split("_")[0])
     doc_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"))
-    if doc_prefix in doc_db['doc_idx_from_name']:
-        print( "Doc {} already parsed".format(path))
+    if doc_prefix in doc_db['doc_idx_from_name'].values:
+        print( "Doc with idx {} already parsed".format(doc_prefix))
     else:
         add_doc_to_db(path)
 

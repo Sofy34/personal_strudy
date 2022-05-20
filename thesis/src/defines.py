@@ -10,7 +10,8 @@ CRF_SEQ_LEN=6
 CRF_SEQ_STEP=6
 CRF_NEIGHBOR_RADIUS=2
 DOC_DB_PATH = {PATH_TO_DFS,"/","doc_db.csv"}
-
+JOIN_WITH_NEXT = ["אני","מ","וואי","כאילו","אבל","נראלי","אז","אה","בעיני","יואי","ממ"]
+JOIN_WITH_PREV = ["זהו","וזהו"]
 YAP_TAG_DICT = {
 'POS_TAGS_DICT' : {
 'AGR-gn' : 'Agreement particle',

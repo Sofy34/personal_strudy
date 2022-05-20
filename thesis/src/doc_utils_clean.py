@@ -18,6 +18,7 @@ global doc_db
 global par_db
 global block_db
 global sent_db
+global debug_db
 
 
 def get_random_paragraph(query):
@@ -39,7 +40,8 @@ def check_text_for_illegal_labels(par):
     return 0
 
 def get_doc_idx_from_name(file_name):
-    return int(file_name.split('_')[0])
+    base_name = os.path.basename(file_name)
+    return int(base_name.split('_')[0])
 
 def add_sent_column_for_labels():
     global sent_db
@@ -49,22 +51,53 @@ def add_sent_column_for_labels():
     sent_db['sent_idx_out_nar'] =  sent_db[sent_db['is_nar']==0].groupby(['doc_idx','block_idx']).cumcount()+1
     sent_db['fist_sent_in_nar'] =  np.where(sent_db['sent_idx_in_nar'] == 1, True, False)
     sent_db['last_sent_in_nar'] =  np.where(sent_db['sent_idx_in_nar'] == sent_db['nar_len_in_sent'], True, False)
+
+def get_dummies_is_client():
+    global sent_db
     sent_db['is_client'] =  np.where(sent_db['par_type'] == 'client', 1, 0)
+
+def handle_short_sent(sent_list):
+    sent_num = len(sent_list)
+    handled_list = []
+    if sent_num < 2:
+        return
+    for i,sent in enumerate(sent_list):
+        words = sent.split()
+        unite = 0
+        if len(words) <= 3:
+            if i<(sent_num - 1) and (sent in sent_list[i+1] or any(word in defines.JOIN_WITH_NEXT for word in words)):
+                united_sent = ' '.join([[sent_list[i],sent_list[i+1]]])
+                add_to_debug_df([('unite_with_next',united_sent)])
+                unite = 1
+            if i>0 and (sent in sent_list[i-1] or any(word in defines.JOIN_WITH_PREV for word in words)):
+                united_sent = ' '.join([[sent_list[i],sent_list[i-1]]])
+                add_to_debug_df([('unite_with_prev',united_sent)])
+                unite = 1
+            if unite:
+                add_to_debug_df([('short_sent_block',' || '.join(sent_list)),('short_sent',sent)])
+
+
+        
 
 def split_block_to_sentences(text):
     text = remove_lr_annotation(text)
-    text = remove_brackets(text) # important to remove before we split into sentences
+    text = replace_brackets(text) # important to remove before we split into sentences
+    text = remove_multi_dots(text)
     text = remove_symbols(text)
-
     sent_list = tokenize.sent_tokenize(text)
-    
     for i,item in enumerate(sent_list):
         clean_item = clean_text(item)
         check_text_for_symbols(clean_item)
+
         if len(clean_item) != 0 and clean_item.isspace() == False: # disregard empty strings
             sent_list[i] = clean_item
+    sent_list = handle_short_sent(sent_list)
     return sent_list
 
+def remove_multi_dots(text):
+    text = re.sub(r'\A\.','',text) # replase ".נקודה בתחילת משפט"
+    text = re.sub(r'\.+?\?','?',text) # replace ?.. with ?
+    return re.sub(r'\.{2,3}', '',text) # replace .. and ... with whitespace
 
 def check_text_for_symbols(text):
     if re.search(r'[\t,\\t]',text):
@@ -78,9 +111,12 @@ def add_sentences_of_blocks_to_db(block_db_idx):
     sent_list = split_block_to_sentences(block)
     for i,sentence in enumerate(sent_list):
         if not text_contains_char(sentence):
-            print("Sentence wihtout char! \n {}".format(sentence))
+            # print("Sentence wihtout char! \n {}".format(sentence))
+            add_to_debug_df([('block_no_char',block),('sent_no_char',sentence)])
             continue
         curr_db_idx = sent_db.shape[0]
+        sent_db.loc[curr_db_idx,'is_question'] = 1 if "?" in sentence else 0
+        # sent_db.loc[curr_db_idx,'text'] = re.sub(r'\?','',sentence)
         sent_db.loc[curr_db_idx,'text'] = sentence
         sent_db.loc[curr_db_idx,'sent_idx_in_block'] = i
         sent_db.loc[curr_db_idx,'block_idx'] = block_db_idx
@@ -93,7 +129,12 @@ def add_sentences_of_blocks_to_db(block_db_idx):
         sent_db.loc[curr_db_idx,'nar_idx'] = block_line['nar_idx']
         sent_db.loc[curr_db_idx,'sent_len'] = len(sentence)
 
-        
+def add_to_debug_df(tupple_list):
+    global debug_db
+    idx = debug_db.shape[0]
+    for tupple in tupple_list:
+        debug_db.loc[idx,tupple[0]]=tupple[1]
+
 
 def split_par_to_blocks_keep_order(par_db_idx):
     par = par_db.loc[par_db_idx,'text']
@@ -114,7 +155,7 @@ def split_par_to_blocks_keep_order(par_db_idx):
         splited = re.split('(&|#)', par) # used for keeping original order between blocks
         splited_clean = splited
         for i,block in enumerate(splited):
-            if '%' in block: # TBD handle story summary
+            if block_has_summary(block): # TBD handle story summary
                 continue
             splited_clean[i] = clean_text(block)
         my_regex = {
@@ -135,11 +176,34 @@ def split_par_to_blocks_keep_order(par_db_idx):
         # handle the rest items in list - that must be non-narrative
         for i,block in enumerate(splited):
             if len(block)!=0:
-                if '%' in block:
+                if block_has_summary(block):
                     continue # TBD handle story summary
                 block_idx = get_index_of_block_in_par(splited_clean,block,par_db_idx)
                 block_list.insert(block_idx,("not_nar",block))
+    check_block_list(par,splited,block_list)
     return block_list
+
+def block_has_summary(text):
+    if not '%' in text:
+        return 0
+    else:
+        occur = text.count('%')
+        if occur%2 == 0:
+            return 1
+        else:
+            add_to_debug_df([('odd_%',text)])
+            return 0
+    
+
+def check_block_list(par,splited,block_list):
+    global debug_db
+    for i,block in enumerate(block_list):
+        if not isinstance(block[1], str):
+            spl = ''.join(splited) if isinstance(splited,list) else "empty"
+            add_to_debug_df([('block_idx',i),("empty_block",str(block)),('splited',spl),("par",par)])
+            #TBD remove 
+            # debug_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"debug_db.csv"),index=False)
+            # sys.exit()
 
 def get_index_of_block_in_par(splited,block,par_db_idx):
     cl_block = clean_text(block)
@@ -198,7 +262,7 @@ def save_doc_blocks(doc_idx_from_name):
     del par_db
     block_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_block_db.csv".format(doc_idx_from_name)),index=False)
     del block_db
-    print("Doc {} blocks saved".format(doc_idx_from_name))
+    # print("Doc {} blocks saved".format(doc_idx_from_name))
 
 def save_doc_sentences(doc_idx_from_name):
     global block_db, sent_db
@@ -207,17 +271,19 @@ def save_doc_sentences(doc_idx_from_name):
     for i in block_db.index:
         add_sentences_of_blocks_to_db(i)
     del block_db
-    add_sent_column_for_labels()
+    # add_sent_column_for_labels()
+    get_dummies_is_client()
     sent_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx_from_name)),index=False)
+    doc_db_update_stat(get_dbIdx_by_docIdx(doc_idx_from_name),'sent_count',len(sent_db.index))
+    doc_db_update_stat(get_dbIdx_by_docIdx(doc_idx_from_name),'nar_sent_count',len(sent_db[sent_db['is_nar']==1].index))
+    print("{} Doc {} sentences saved".format(doc_idx_from_name,len(sent_db.index)))
     del sent_db
-    print("Doc {} sentences saved".format(doc_idx_from_name))
+
 
 def save_doc_paragraphs(doc_idx_from_name):
     global par_db, doc_db
     inside_narrative = 0
-    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
-    doc_db = pd.read_csv(doc_db_path)
-    doc_path = doc_db.loc[doc_db['doc_idx_from_name']==doc_idx_from_name,'path'].values[0]
+    doc_path = doc_db.loc[get_dbIdx_by_docIdx(doc_idx_from_name),'path'].values[0]
     if os.path.isfile(doc_path):
         doc = docx.Document(doc_path)
     else:
@@ -227,6 +293,9 @@ def save_doc_paragraphs(doc_idx_from_name):
     for i,par in enumerate(doc.paragraphs):
         curr_par_db_idx = par_db.shape[0]
         text,par_type = get_par_type_erase(par.text)
+        if not par_type in ['client','therapist']:
+            print("ERROR got par_type is {}, doc {}, par {} text\{}".format(par_type,doc_idx_from_name,i,text))
+            exit()
         if len(text) == 0:
             continue
         par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx_from_name
@@ -240,29 +309,43 @@ def save_doc_paragraphs(doc_idx_from_name):
         if par.text.rfind(defines.END_CHAR) > par.text.rfind(defines.START_CHAR): # if [...# ] or [ ...&...#]
             inside_narrative = 0
     par_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_par_db.csv".format(doc_idx_from_name)),index=False)
+    doc_db_update_stat(get_dbIdx_by_docIdx(doc_idx_from_name),'par_count',len(doc.paragraphs))
     del par_db
-    print("Doc {} paragraphs saved".format(doc_idx_from_name))
+    # print("Doc {} paragraphs saved".format(doc_idx_from_name))
+
+def doc_db_update_stat(idx,val_name,value):
+    global goc_db
+    doc_db.loc[idx,val_name]=value
 
 def save_all_docs_paragraphs():
     global doc_db
     for doc_idx in doc_db.index:
         save_doc_paragraphs(doc_idx)
 
-
-
-
-def save_docs_db():
+def get_dbIdx_by_docIdx(doc_idx):
     global doc_db
+    # print ("Doc idx {} db idx {}".format(doc_idx,doc_db[doc_db['doc_idx_from_name']==doc_idx].index.values))
+    return doc_db[doc_db['doc_idx_from_name']==doc_idx].index.values
+
+def save_docs_db(doc_path_list = None):
+    global doc_db
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    if os.path.isfile(doc_db_path):
+        os.remove(doc_db_path)
+    print ("Creating doc_db")
     doc_db = pd.DataFrame()
-    doc_path_list = get_labeled_files()
+    if doc_path_list is None:
+        doc_path_list = get_labeled_files()
     for path in doc_path_list:
         add_doc_to_db(path)
     doc_db['doc_idx_from_name'] = doc_db['doc_idx_from_name'].astype(int)
-    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
+    doc_db.to_csv(doc_db_path,index=False)
+    del doc_db
 
 
 def remove_punctuation(_text):
-    text = _text.translate(str.maketrans('', '',string.punctuation))
+    punct=re.sub('\?','',string.punctuation) # keep ?
+    text = _text.translate(str.maketrans('', '',punct))
     return text
  
 
@@ -274,29 +357,21 @@ def get_labeled_files():
 
 
 def add_doc_to_db(path):
+    global doc_db
     if not os.path.isfile(path):
         print ("ERROR: file {} does not exists".format(path))
         return
-    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
-    if os.path.isfile(doc_db_path):
-        doc_db = pd.read_csv(doc_db_path)
-    else:
-        print ("Creating doc_db")
-        doc_db_path = pd.DataFrame()
     file_name = os.path.basename(path)
     doc_db_idx = doc_db.shape[0]
-    doc_idx_from_name = get_doc_idx_from_name(file_name)
-    if doc_idx_from_name in doc_db['doc_idx_from_name'].values:
-        print ("ERROR: doc {} already saved".format(path))
-        return
-    else:
-        doc_db.loc[doc_db_idx,'path'] = path
-        doc_db.loc[doc_db_idx,'file_name'] = file_name
-        doc_db.loc[doc_db_idx,'doc_idx_from_name'] = doc_idx_from_name
-    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
+    doc_idx_from_name = get_doc_idx_from_name(path)
+    doc_db.loc[doc_db_idx,'path'] = path
+    doc_db.loc[doc_db_idx,'file_name'] = file_name
+    doc_db.loc[doc_db_idx,'doc_idx_from_name'] = int(doc_idx_from_name)
+    
 
-def remove_brackets(text):
-    return re.sub(r'\(\..*?\)|\[.*?\]','',text)
+def replace_brackets(text, replace=''): # remove [..] , (..), [..[.]..]
+    return re.sub(r'\(.*?\)|\[.*[^\[]?\]',replace,text)
+
 
 def clean_text(text):
     text,_ =  extract_narrative_summary(text)
@@ -304,7 +379,7 @@ def clean_text(text):
     return text
 
 def remove_symbols(text):
-    return re.sub(r'[@#&\*\t\\t]','',text)
+    return re.sub(r'[@#&<>\*\t\\t]','',text)
 
 def extract_narrative_summary(text):
     summary = re.findall('%.*?%',text)
@@ -319,31 +394,54 @@ def remove_lr_annotation(text):
 def get_par_type_erase(par):
     par_type = 'no_mark'
     if 'CLIENT' in par[:20]: # search for a tag in the begginning of a line
-        par = re.sub('CLIENT(.*?:)', '',par)
+        par = re.sub('CLIENT(.*?:|)', '',par)
         par_type = 'client'
     if 'THERAPIST' in par[:20]: # search for a tag in the begginning of a line
-        par = re.sub('THERAPIST(.*?:)', '',par)
+        par = re.sub('THERAPIST(.*?:|)', '',par)
         par_type= 'therapist'
     check_text_for_illegal_labels(par)
     return par,par_type
 
-def get_all_data():
-    save_docs_db()
-    for doc_idx in doc_db.index:
-        parse_doc(doc_idx)
+def parse_all_docs(doc_path_list = None):
+    global doc_db, debug_db
+    save_docs_db(doc_path_list)
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+    doc_db = pd.read_csv(doc_db_path)
+    debug_db = pd.DataFrame()
+    doc_indices = doc_db['doc_idx_from_name'].values
+    doc_indices.sort()
+    for i,doc_idx in enumerate(doc_indices):
+        parse_doc(int(doc_idx))
+        print("Finished doc {} of {}".format(i,len(doc_db.index)))
+    doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
+    debug_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"debug_db.csv"),index=False)
+    del doc_db
+    del debug_db
     
-    
-def parse_doc(doc_idx):
+def parse_doc(doc_idx, single = False):
+    global doc_db,debug_db
+    if single:
+        doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
+        doc_db = pd.read_csv(doc_db_path)
+        debug_db = pd.DataFrame()
     save_doc_paragraphs(doc_idx)
     save_doc_blocks(doc_idx)
     save_doc_sentences(doc_idx)
+    if single:
+        debug_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"debug_db.csv"),index=False)
+        doc_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"),index=False)
+
 
 def add_new_doc(path):
+    global doc_db
     doc_prefix = int(os.path.basename(path).split("_")[0])
     doc_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"))
-    if doc_prefix in doc_db['doc_idx_from_name'].values:
-        print( "Doc with idx {} already parsed".format(doc_prefix))
-    else:
-        add_doc_to_db(path)
+    # if doc_prefix in doc_db['doc_idx_from_name'].values:
+    #     print( "Doc with idx {} already parsed".format(doc_prefix))
+    # else:
+    #     add_doc_to_db(path)
+    add_doc_to_db(path)
+
+
 
 

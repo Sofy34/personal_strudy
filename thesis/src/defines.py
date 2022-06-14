@@ -12,6 +12,10 @@ CRF_NEIGHBOR_RADIUS=2
 DOC_DB_PATH = {PATH_TO_DFS,"/","doc_db.csv"}
 JOIN_WITH_NEXT = ["אני","מ","וואי","כאילו","אבל","נראלי","אז","אה","בעיני","יואי","ממ"]
 JOIN_WITH_PREV = ["זהו","וזהו"]
+MIN_SENT_LEN = 3
+TF_TYPES = ['word','char','char_wb']
+# TF_TYPES = []
+SENT_FEATURES=['is_nar','is_client','sent_len','par_idx_in_doc','sent_idx_in_par']
 YAP_TAG_DICT = {
 'POS_TAGS_DICT' : {
 'AGR-gn' : 'Agreement particle',

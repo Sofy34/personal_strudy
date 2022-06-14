@@ -56,34 +56,52 @@ def get_dummies_is_client():
     global sent_db
     sent_db['is_client'] =  np.where(sent_db['par_type'] == 'client', 1, 0)
 
-def handle_short_sent(sent_list):
-    sent_num = len(sent_list)
-    handled_list = []
-    if sent_num < 2:
-        return
-    for i,sent in enumerate(sent_list):
-        words = sent.split()
-        unite = 0
-        if len(words) <= 3:
-            if i<(sent_num - 1) and (sent in sent_list[i+1] or any(word in defines.JOIN_WITH_NEXT for word in words)):
-                united_sent = ' '.join([[sent_list[i],sent_list[i+1]]])
-                add_to_debug_df([('unite_with_next',united_sent)])
-                unite = 1
-            if i>0 and (sent in sent_list[i-1] or any(word in defines.JOIN_WITH_PREV for word in words)):
-                united_sent = ' '.join([[sent_list[i],sent_list[i-1]]])
-                add_to_debug_df([('unite_with_prev',united_sent)])
-                unite = 1
-            if unite:
-                add_to_debug_df([('short_sent_block',' || '.join(sent_list)),('short_sent',sent)])
+def handle_short_sent_in_block(block):
+    handled_block=block
+    block_len =  len(handled_block)
+    curr_dot_idx = block_len - 1
+    prev_dot_idx = 0
+    # step = 0
+    while curr_dot_idx < block_len:
+        # step+=1
+        curr_dot_idx = find_dot_idx(handled_block,prev_dot_idx+1)
+        # print("step {} curr_dot_idx {} prev_dot_idx {}".format(step,curr_dot_idx,prev_dot_idx))
+        if curr_dot_idx < 1: 
+            break
+        focus = handled_block[prev_dot_idx:curr_dot_idx]
+        word_count = count_words(focus)
+        # print ("\tword count in {} is {}".format(word_count,focus))
+        if word_count > 0 and word_count <= defines.MIN_SENT_LEN:
+            handled_block = replace_char_at_index(handled_block,curr_dot_idx)
+        prev_dot_idx = curr_dot_idx    
+    return handled_block
+            
+                
+def replace_char_at_index(org_str, index, replacement = ''):
+    ''' Replace character at index in string org_str with the
+    given replacement character.'''
+    new_str = org_str
+    if index < len(org_str):
+        new_str = org_str[0:index] + replacement + org_str[index + 1:]
+    return new_str           
 
+def find_dot_idx(text,start):
+    return text.find('.',start)
+
+def count_words(text):
+    return len(text.split())
+    
 
         
 
-def split_block_to_sentences(text):
+def split_block_to_sentences(text,merge_short=False):
     text = remove_lr_annotation(text)
     text = replace_brackets(text) # important to remove before we split into sentences
     text = remove_multi_dots(text)
     text = remove_symbols(text)
+    if merge_short:
+        text = handle_short_sent_in_block(text)
+
     sent_list = tokenize.sent_tokenize(text)
     for i,item in enumerate(sent_list):
         clean_item = clean_text(item)
@@ -91,13 +109,15 @@ def split_block_to_sentences(text):
 
         if len(clean_item) != 0 and clean_item.isspace() == False: # disregard empty strings
             sent_list[i] = clean_item
-    sent_list = handle_short_sent(sent_list)
     return sent_list
+
+
 
 def remove_multi_dots(text):
     text = re.sub(r'\A\.','',text) # replase ".נקודה בתחילת משפט"
     text = re.sub(r'\.+?\?','?',text) # replace ?.. with ?
-    return re.sub(r'\.{2,3}', '',text) # replace .. and ... with whitespace
+    # return re.sub(r'\.{2,3}', '',text) # replace .. and ... with whitespace
+    return re.sub(r'\.{2,3}', '.',text) # replace .. and ... with .
 
 def check_text_for_symbols(text):
     if re.search(r'[\t,\\t]',text):

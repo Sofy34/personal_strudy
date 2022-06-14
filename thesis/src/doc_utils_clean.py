@@ -293,6 +293,7 @@ def save_doc_sentences(doc_idx_from_name):
     del block_db
     # add_sent_column_for_labels()
     get_dummies_is_client()
+    sent_db["sent_idx_in_par"] = sent_db.groupby('par_idx_in_doc').cumcount()
     sent_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx_from_name)),index=False)
     doc_db_update_stat(get_dbIdx_by_docIdx(doc_idx_from_name),'sent_count',len(sent_db.index))
     doc_db_update_stat(get_dbIdx_by_docIdx(doc_idx_from_name),'nar_sent_count',len(sent_db[sent_db['is_nar']==1].index))
@@ -315,7 +316,7 @@ def save_doc_paragraphs(doc_idx_from_name):
         text,par_type = get_par_type_erase(par.text)
         if not par_type in ['client','therapist']:
             print("ERROR got par_type is {}, doc {}, par {} text\{}".format(par_type,doc_idx_from_name,i,text))
-            exit()
+            os.exit()
         if len(text) == 0:
             continue
         par_db.loc[curr_par_db_idx,'doc_idx'] = doc_idx_from_name
@@ -370,10 +371,9 @@ def remove_punctuation(_text):
  
 
 def get_labeled_files():
-    doc_path_list = []
-    for file in glob.glob("./tmp/*.docx"): # _lc is name pattern of labeled cleaned *.docx files
-        doc_path_list.append(file)
-    return doc_path_list
+    doc_list =  glob.glob(os.path.join(os.path.join(os.getcwd(),"./tmp/*")))
+    doc_list.sort()
+    return doc_list
 
 
 def add_doc_to_db(path):
@@ -454,13 +454,15 @@ def parse_doc(doc_idx, single = False):
 
 def add_new_doc(path):
     global doc_db
+    doc_db_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv")
     doc_prefix = int(os.path.basename(path).split("_")[0])
-    doc_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"doc_db.csv"))
+    doc_db = pd.read_csv(doc_db_path)
     # if doc_prefix in doc_db['doc_idx_from_name'].values:
     #     print( "Doc with idx {} already parsed".format(doc_prefix))
     # else:
     #     add_doc_to_db(path)
     add_doc_to_db(path)
+    doc_db.to_csv(doc_db_path,index=False)
 
 
 

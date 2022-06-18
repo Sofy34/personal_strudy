@@ -28,6 +28,7 @@ from sklearn_crfsuite.metrics import flat_classification_report
 from sklearn.model_selection import LeaveOneGroupOut,LeavePGroupsOut,GroupKFold
 
 import itertools
+import common_utils
 
 regressors_instance = {}
 regressors_prediction = {}
@@ -51,10 +52,10 @@ def load_fasstex_model():
 
 ### EMBEDDED VECTORS ###
 
-def get_and_save_sent_vectors(doc_idx,ft,dim = 300): 
-    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)))
+def get_and_save_sent_vectors(dir_name,doc_idx,ft,dim = 300): 
+    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_db.csv".format(doc_idx)))
     sent_vec_db = get_vector_per_sentence(sent_db,ft,dim)
-    sent_vec_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_vec{}_db.csv".format(doc_idx,dim)),index=False)
+    sent_vec_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_vec{}_db.csv".format(doc_idx,dim)),index=False)
     print("{} doc sent saved".format(doc_idx,dim))
 
 def get_vector_per_sentence(db, ft, dim = 300):
@@ -65,10 +66,10 @@ def get_vector_per_sentence(db, ft, dim = 300):
     sent_vec_db = pd.DataFrame(sent_vectors)
     return sent_vec_db
 
-def get_and_save_doc_similarity(doc_idx,dim = 300): 
-    sent_vec_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_vec{}_db.csv".format(doc_idx,dim)))
+def get_and_save_doc_similarity(dir_name,doc_idx,dim = 300): 
+    sent_vec_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_vec{}_db.csv".format(doc_idx,dim)))
     sim_db = pd.DataFrame(cosine_similarity(sent_vec_db))
-    sim_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_sim_vec{}_db.csv".format(doc_idx,dim)),index=False)
+    sim_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_sim_vec{}_db.csv".format(doc_idx,dim)),index=False)
     print("{} sim_db sent saved".format(doc_idx))
 
 #########################
@@ -142,7 +143,7 @@ def tfidf_build_all_save_per_doc(per_word = True,per_lemma=True,analyzer = 'char
     sample_features(features)
     sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))
     for i,doc_name in enumerate(sent_lemma_db_list):
-        doc_prefix = get_doc_idx_from_name(doc_name)
+        doc_prefix = common_utils.get_doc_idx_from_name(doc_name)
         X = tfidf_transform_doc(doc_prefix,tf,per_lemma)
         sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf_{}.npz".format(doc_prefix,tf_string)), X)
         print("TfIdf {} saved".format(doc_prefix))
@@ -155,29 +156,29 @@ def tfidf_build_all_save_per_doc(per_word = True,per_lemma=True,analyzer = 'char
 
 ## POS from YAP ###
 
-def get_and_save_sent_lemma_db(doc_idx):
-    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx))
+def get_and_save_sent_lemma_db(dir_name,doc_idx):
+    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_pos_db.csv".format(doc_idx))
     if not os.path.isfile(doc_name):
         print("ERROR: {} does not exists".format(doc_name))
         return
     sent_pos_db = pd.read_csv(doc_name,usecols=['sent_idx','LEMMA'])
     sent_lemma_db = pd.DataFrame()
     sent_lemma_db['sent_lemma'] = sent_pos_db.groupby('sent_idx')['LEMMA'].apply(lambda x: "%s" % ' '.join(x)).tolist()
-    sent_lemma_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_lemma_db.csv".format(doc_idx)),index=False)
+    sent_lemma_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_lemma_db.csv".format(doc_idx)),index=False)
     print("{} sent lemma db saved".format(doc_idx))
 
 
 
-def get_and_save_sent_pos_count_db(doc_idx):
+def get_and_save_sent_pos_count_db(dir_name,doc_idx):
     columns_to_count = ['POSTAG','f_gen','f_num','f_suf_gen','f_suf_num','f_suf_per','f_per','f_tense']
-    sent_pos_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx)))
+    sent_pos_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_pos_db.csv".format(doc_idx)))
     sent_pos_dummies = pd.get_dummies(sent_pos_db,columns=columns_to_count)
     sent_pos_dummies.fillna(value=0,inplace=True)
     count_db = sent_pos_dummies.groupby('sent_idx').sum()
     count_db['TOKEN'] = sent_pos_dummies.groupby('sent_idx')['TOKEN'].max()
     count_db.drop(['FROM','TO','doc_idx'],inplace=True,axis=1)
     normalize_pos_count_on_sent_len(count_db)
-    count_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_count_db.csv".format(doc_idx)),index=False)
+    count_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_pos_count_db.csv".format(doc_idx)),index=False)
     print("{} sent count db saved".format(doc_idx))
 
 
@@ -186,11 +187,11 @@ def normalize_pos_count_on_sent_len(count_db):
 #########################
 
 ### Merge all sentense features into single DB ###
-def merge_sent_pos_db(doc_idx):
-    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_db.csv".format(doc_idx)),usecols=defines.SENT_FEATURES)
-    count_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_count_db.csv".format(doc_idx)))
+def merge_sent_pos_db(dir_name,doc_idx):
+    sent_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_db.csv".format(doc_idx)),usecols=defines.SENT_FEATURES)
+    count_db = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_pos_count_db.csv".format(doc_idx)))
     merged_db =  pd.merge(sent_db,count_db, left_index=True,right_index=True,validate="one_to_one")
-    merged_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx)),index=False)
+    merged_db.to_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_merged_db.csv".format(doc_idx)),index=False)
     print("{} sent features db saved".format(doc_idx))
 
 #########################
@@ -198,12 +199,12 @@ def merge_sent_pos_db(doc_idx):
 ### Pack sentense features for CRF  ###
 
 curr_doc_db = {}
-def load_doc_features(doc_idx,tf_types = ['word','char_wb']):
+def load_doc_features(dir_name,doc_idx,tf_types = ['word','char_wb']):
     global curr_doc_db
-    curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_merged_db.csv".format(doc_idx)))
-    curr_doc_db['sim_vec']  = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_sim_vec300_db.csv".format(doc_idx)))
+    curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_merged_db.csv".format(doc_idx)))
+    curr_doc_db['sim_vec']  = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_sim_vec300_db.csv".format(doc_idx)))
     for tf_type in tf_types:
-        curr_doc_db['tfidf_{}'.format(tf_type)] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_tfidf_{}.npz".format(doc_idx,tf_type)))
+        curr_doc_db['tfidf_{}'.format(tf_type)] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}.npz".format(doc_idx,tf_type)))
     return curr_doc_db
 
 def save_doc_packed_features(doc_idx,dictionary_data):
@@ -231,7 +232,7 @@ def pack_all_doc_features(seq_len = 6,step = 6):
     merged_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_merged_db.csv"))
     merged_db_list.sort()
     for doc_name in merged_db_list:
-        doc_idx = get_doc_idx_from_name(doc_name)
+        doc_idx = common_utils.get_doc_idx_from_name(doc_name)
         load_doc_features(doc_idx)
         X_doc,y_doc,groups_doc =  pack_doc_features(doc_idx)
         X.extend(X_doc)
@@ -272,29 +273,34 @@ def reshape_doc_paragraphs_to_sequence_by_len(X,y,groups,seq_len,step):
     print ("doc paragraphs reshaped: from {} to {}".format(len(X),len(X_seq)))
     return X_seq,y_seq,groups_seq
 
-def pack_doc_per_paragraph(doc_idx):
+def pack_doc_per_paragraph(doc_idx,doc_as_sequence):
     par_indices = curr_doc_db['merged']['par_idx_in_doc'].unique()
     # print("Doc {} had {} paragraphs".format(doc_idx,len(par_indices)))
-    X_doc = [par2features(par_idx) for par_idx in par_indices] 
+    X_doc = [par2features(par_idx,doc_as_sequence) for par_idx in par_indices] 
     # save_doc_packed_features(doc_idx,X_doc) #TBD open after solve 'Object of type int64 is not JSON serializable'
     y_doc = [par2label(par_idx) for par_idx in par_indices]
     groups_doc =  [doc_idx for i in range(len(y_doc))]
     print ("{} doc {} paragraphes packed".format(doc_idx,len(par_indices)))
     return X_doc,y_doc,groups_doc
 
-def par2features(par_idx): #doc_len is dummy variable
+def par2features(par_idx,doc_as_sequence): #doc_len is dummy variable
     par_len = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").shape[0]
+    par_sentences = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").index
+    doc_sent_num = len(curr_doc_db['merged'].index)
     # print("par {} has {} sentenses".format(par_idx,par_len))
-    X_par = [sent2features(sent_idx,idx_in_seq,par_len) for idx_in_seq,sent_idx in enumerate(curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").index)] 
+    if doc_as_sequence:
+        X_par = [sent2features(sent_idx,sent_idx,doc_sent_num) for sent_idx in par_sentences] 
+    else:
+        X_par = [sent2features(sent_idx,idx_in_seq,par_len) for idx_in_seq,sent_idx in enumerate(par_sentences)] 
     return X_par
 
-def pack_doc_per_paragraph_limit(doc_idx,limit=0):# 0 means no limit
+def pack_doc_per_paragraph_limit(doc_idx,limit,doc_as_sequence):# 0 means no limit
     par_indices = curr_doc_db['merged']['par_idx_in_doc'].unique()
     X_doc = []
     y_doc = []
     groups_doc = []
     for par_idx in par_indices:
-        sub_par_x_list = par2features_limit(par_idx,limit)
+        sub_par_x_list = par2features_limit(par_idx,limit,doc_as_sequence)
         sub_par_y_list = par2label_limit(par_idx,limit)
         for i in range(len(sub_par_x_list)):
             X_doc.append(sub_par_x_list[i])
@@ -309,9 +315,9 @@ def reshape_docs_map_to_seq(docs_map,per_par,seq_len,step):
             X_doc,y_doc,groups_doc = reshape_doc_paragraphs_to_sequence(docs_map[doc]['X'],docs_map[doc]['y'],doc,seq_len,step)
         else:
             X_doc,y_doc,groups_doc = reshape_doc_features_to_sequence(docs_map[doc]['X'],docs_map[doc]['y'],doc,seq_len,step)
-        docs_map[doc]['X_shaped'] = X_doc
-        docs_map[doc]['y_shaped'] = y_doc
-        docs_map[doc]['groups_shpaped'] = groups_doc
+        docs_map[doc]['X_{}_{}'.format(seq_len,step)] = X_doc
+        docs_map[doc]['y_{}_{}'.format(seq_len,step)] = y_doc
+        docs_map[doc]['groups_{}_{}'.format(seq_len,step)] = groups_doc
     # return docs_map
 
 def par2label_limit(par_idx,limit=0):
@@ -323,14 +329,21 @@ def par2label_limit(par_idx,limit=0):
         y_par.append([sent2label(sent_idx) for sent_idx in sub_indices])
     return y_par
 
-def par2features_limit(par_idx,limit=0): #limit maximum sentences per paragraph
+def par2features_limit(par_idx,limit,doc_as_sequence): #limit maximum sentences per paragraph
     par_len = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").shape[0]
     sent_indices = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").index
+    doc_sent_num = len(curr_doc_db['merged'].index)
     X_par = []
     for i in np.arange(0,par_len,limit):#0-7, 8-15....
         sub_indices = sent_indices[i:min(par_len,i+limit)]
-        X_par.append([sent2features(sent_idx,idx,len(sub_indices)) for idx,sent_idx in enumerate(sub_indices)])
+        if doc_as_sequence:
+            sub_par = [sent2features(sent_idx,sent_idx,doc_sent_num) for sent_idx in sub_indices] 
+        else:
+            sub_par = [sent2features(sent_idx,idx,len(sub_indices)) for idx,sent_idx in enumerate(sub_indices)] 
+        X_par.append(sub_par)
     return X_par
+
+
 
 
 def doc_sent2features_db(dox_idx):
@@ -378,7 +391,7 @@ def pack_all_doc_sentences(per_par=False,tf_types = ['word','char_wb']):
     # if os.path.isfile(doc_db_path):
     #     doc_db = pd.read_csv(doc_db_path)
     for doc_name in sent_lemma_db_list:
-        doc_idx = get_doc_idx_from_name(doc_name) 
+        doc_idx = common_utils.get_doc_idx_from_name(doc_name) 
         load_doc_features(doc_idx,tf_types)
         if per_par:
             X_doc,y_doc,groups_doc =  pack_doc_per_paragraph(doc_idx)
@@ -392,20 +405,20 @@ def pack_all_doc_sentences(per_par=False,tf_types = ['word','char_wb']):
     print("{} sentenced packed for {} docs".format(len(X),len(sent_lemma_db_list)))
     return X,y,groups
 
-def pack_all_doc_sentences_to_map(per_par=False,limit=0,sent_lemma_db_list=[],tf_types = ['word','char_wb']):
+def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,sent_lemma_db_list=[],tf_types = ['word','char_wb']):
     docs_map = {}
     if len(sent_lemma_db_list) ==0:
-        sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, "*_sent_lemma_db.csv"))    
+        sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, dir_name,"*_sent_lemma_db.csv"))    
     total_sent = 0
     for doc_name in sent_lemma_db_list:
-        doc_idx = get_doc_idx_from_name(doc_name) 
-        load_doc_features(doc_idx,tf_types)
+        doc_idx = common_utils.get_doc_idx_from_name(doc_name) 
+        load_doc_features(dir_name,doc_idx,tf_types)
         docs_map[doc_idx] = {}
         if per_par:
             if limit == 0:
-                X_doc,y_doc,groups_doc =  pack_doc_per_paragraph(doc_idx)
+                X_doc,y_doc,groups_doc =  pack_doc_per_paragraph(doc_idx,doc_as_sequence)
             else:
-                X_doc,y_doc,groups_doc = pack_doc_per_paragraph_limit(doc_idx,limit)
+                X_doc,y_doc,groups_doc = pack_doc_per_paragraph_limit(doc_idx,limit,doc_as_sequence)
         else:
             X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx)
         docs_map[doc_idx]['X'] = X_doc
@@ -418,17 +431,19 @@ def pack_all_doc_sentences_to_map(per_par=False,limit=0,sent_lemma_db_list=[],tf
     return docs_map
 
 
-def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start_idx = 1):
+def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2):
     global curr_doc_db
     features = {}
+    columns =  list(curr_doc_db['merged'].columns.values)
+    columns.remove('is_nar')
     # print ("Parsing sent idx {} idx_in_seq {} seq_len {}".format(sent_idx,idx_in_seq,seq_len))
-    for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+    for col in columns:
         if save_feature_value(curr_doc_db['merged'].loc[sent_idx,col],col):
             features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col]
 
     if idx_in_seq > 1:
         update = {}
-        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+        for col in columns:
             if save_feature_value(curr_doc_db['merged'].loc[sent_idx-1,col],col):
                 update["-1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-1,col]
         features.update(update)
@@ -436,7 +451,7 @@ def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start
     
     if idx_in_seq > 2:
         update = {}
-        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+        for col in columns:
             if save_feature_value(curr_doc_db['merged'].loc[sent_idx-2,col],col):
                 update["-2:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx-2,col]
         features.update(update)
@@ -461,14 +476,14 @@ def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2,columns_start
 
     if idx_in_seq < seq_len-1:
         update = {}
-        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+        for col in columns:
             if save_feature_value(curr_doc_db['merged'].loc[sent_idx+1,col],col):
                 update["+1:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx+1,col]
         features.update(update)
 
     if idx_in_seq < seq_len-2:
         update = {}
-        for col in curr_doc_db['merged'].columns[columns_start_idx:]:
+        for col in columns:
             if save_feature_value(curr_doc_db['merged'].loc[sent_idx+2,col],col):
                 update["+2:{}".format(col)]=curr_doc_db['merged'].loc[sent_idx+2,col]
         features.update(update)
@@ -484,7 +499,7 @@ def save_feature_value(value,name):
     return save
 
 def sent2label(sent_idx):
-    return "{}".format(curr_doc_db['merged'].loc[sent_idx,'is_nar'].astype(bool))
+    return "is_nar" if curr_doc_db['merged'].loc[sent_idx,'is_nar'].astype(bool)==True else "not_nar"
 
 
 def doc2features(first_sent_idx,seq_len=6,seq_step=6):
@@ -493,10 +508,6 @@ def doc2labels(first_sent_idx,seq_len=6,seq_step=6):
     return [sent2label(sent_idx) for sent_idx in range(first_sent_idx,first_sent_idx+seq_len)]
 
 #########################
-
-def get_doc_idx_from_name(file_name):
-    base_name = os.path.basename(file_name)
-    return int(base_name.split('_')[0])
 
 def get_num_text_union(df):
     numeric_cols = df.columns[df.columns.dtype != object].tolist()
@@ -735,16 +746,16 @@ def fit_predict_all_regressors(X_train,y_train,X_test):
         regressors_prediction[regr.__class__.__name__]= regr.predict(X_test)
 
 ### Get all possible features of document after pasring ###
-def save_doc_features(doc_idx,ft):
-    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,"{:02d}_sent_pos_db.csv".format(doc_idx))
+def save_doc_features(dir_name,doc_idx,ft):
+    doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_pos_db.csv".format(doc_idx))
     if not os.path.isfile(doc_name):
         print("ERROR: {} does not exists".format(doc_name))
         return
-    get_and_save_sent_lemma_db(doc_idx)
-    get_and_save_sent_pos_count_db(doc_idx)
-    merge_sent_pos_db(doc_idx)
-    get_and_save_sent_vectors(doc_idx,ft)
-    get_and_save_doc_similarity(doc_idx)
+    get_and_save_sent_lemma_db(dir_name,doc_idx)
+    get_and_save_sent_pos_count_db(dir_name,doc_idx)
+    merge_sent_pos_db(dir_name,doc_idx)
+    get_and_save_sent_vectors(dir_name,doc_idx,ft)
+    get_and_save_doc_similarity(dir_name,doc_idx)
 
 
 ######

@@ -11,7 +11,7 @@ import numpy as np
 import pandas as pd
 import seaborn as sns
 from nltk import tokenize
-
+import common_utils
 
 pd.options.display.float_format = "{:f}".format
 
@@ -59,9 +59,6 @@ def check_text_for_illegal_labels(par):
     return 0
 
 
-def get_doc_idx_from_name(file_name):
-    base_name = os.path.basename(file_name)
-    return int(base_name.split("_")[0])
 
 
 def add_sent_column_for_labels():
@@ -127,7 +124,7 @@ def count_words(text):
     return len(text.split())
 
 
-def split_block_to_sentences(text, merge_short=False):
+def split_block_to_sentences(text, merge_short):
     text = remove_lr_annotation(text)
     # important to remove before we split into sentences
     text = replace_brackets(text)
@@ -161,11 +158,11 @@ def check_text_for_symbols(text):
         quit()
 
 
-def add_sentences_of_blocks_to_db(block_db_idx):
+def add_sentences_of_blocks_to_db(block_db_idx,merge_short_sent):
     global sent_db
     block_line = block_db.iloc[block_db_idx]
     block = block_line["text"]
-    sent_list = split_block_to_sentences(block)
+    sent_list = split_block_to_sentences(block,merge_short_sent)
     for i, sentence in enumerate(sent_list):
         if not text_contains_char(sentence):
             # print("Sentence wihtout char! \n {}".format(sentence))
@@ -352,7 +349,7 @@ def save_doc_blocks(doc_idx_from_name):
     # print("Doc {} blocks saved".format(doc_idx_from_name))
 
 
-def save_doc_sentences(doc_idx_from_name):
+def save_doc_sentences(doc_idx_from_name,merge_short_sent):
     global block_db, sent_db
     sent_db = pd.DataFrame()
     block_db = pd.read_csv(
@@ -363,7 +360,7 @@ def save_doc_sentences(doc_idx_from_name):
         )
     )
     for i in block_db.index:
-        add_sentences_of_blocks_to_db(i)
+        add_sentences_of_blocks_to_db(i,merge_short_sent)
     del block_db
     # add_sent_column_for_labels()
     get_dummies_is_client()
@@ -488,7 +485,7 @@ def add_doc_to_db(path):
         return
     file_name = os.path.basename(path)
     doc_db_idx = doc_db.shape[0]
-    doc_idx_from_name = get_doc_idx_from_name(path)
+    doc_idx_from_name = common_utils.get_doc_idx_from_name(path)
     doc_db.loc[doc_db_idx, "path"] = path
     doc_db.loc[doc_db_idx, "file_name"] = file_name
     doc_db.loc[doc_db_idx, "doc_idx_from_name"] = int(doc_idx_from_name)
@@ -531,7 +528,7 @@ def get_par_type_erase(par):
     return par, par_type
 
 
-def parse_all_docs(doc_path_list=None):
+def parse_all_docs(merge_short_sent,doc_path_list=None):
     global doc_db, debug_db
     save_docs_db(doc_path_list)
     doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
@@ -540,7 +537,7 @@ def parse_all_docs(doc_path_list=None):
     doc_indices = doc_db["doc_idx_from_name"].values
     doc_indices.sort()
     for i, doc_idx in enumerate(doc_indices):
-        parse_doc(int(doc_idx))
+        parse_doc(int(doc_idx),merge_short_sent)
         print("Finished doc {} of {}".format(i, len(doc_db.index)))
     doc_db.to_csv(
         os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv"), index=False
@@ -552,7 +549,7 @@ def parse_all_docs(doc_path_list=None):
     del debug_db
 
 
-def parse_doc(doc_idx, single=False):
+def parse_doc(doc_idx, merge_short_sent, single=False):
     global doc_db, debug_db
     if single:
         doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
@@ -560,7 +557,7 @@ def parse_doc(doc_idx, single=False):
         debug_db = pd.DataFrame()
     save_doc_paragraphs(doc_idx)
     save_doc_blocks(doc_idx)
-    save_doc_sentences(doc_idx)
+    save_doc_sentences(doc_idx,merge_short_sent)
     if single:
         debug_db.to_csv(
             os.path.join(os.getcwd(), defines.PATH_TO_DFS, "debug_db.csv"), index=False

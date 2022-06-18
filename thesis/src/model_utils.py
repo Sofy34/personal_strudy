@@ -7,7 +7,7 @@ from sklearn_crfsuite import scorers, CRF
 from sklearn_crfsuite import metrics
 from sklearn_crfsuite.metrics import flat_classification_report
 import os
-
+from termcolor import colored, cprint
 
 
 
@@ -163,3 +163,59 @@ def manual_get_prediction(X_train,y_train,X_test,y_test):
     return [f1,recall,precision]
 
 
+
+
+def get_labeles_par_corpus(par_idx,doc_db):
+    par_corpus = {}
+    par_db = doc_db.query("par_idx_in_doc == @par_idx")
+    par_corpus['sentenses'] = par_db['text'].tolist()
+    par_corpus['pred'] = par_db['pred'].tolist()
+    par_corpus['label'] = par_db['label'].tolist()
+    par_corpus['is_nar'] = par_db['is_nar'].tolist()
+    return par_corpus
+
+def get_labeled_doc_corpus(doc_idx,selected_par_indices,pred_info_df):
+    doc_corpus = {}
+    used_indices = []
+    doc_db = pred_info_df.query("doc_idx == @doc_idx")
+    for idx in selected_par_indices:
+        if idx in used_indices:
+            continue
+        doc_corpus[idx] = get_labeles_par_corpus(idx,doc_db)
+        used_indices.append(idx)
+        if len(doc_corpus[idx]['sentenses']) < 2:
+            for i in [-1,1]:
+                doc_corpus[idx+i] = get_labeles_par_corpus(idx+i,doc_db)
+                used_indices.append(idx+1)
+    return doc_corpus
+
+
+
+def print_error_par_text(indices,pred_info_df):
+    color_map = {
+    1: 'green',
+    0: 'red'
+    }
+    nar_args = {
+        1: ['underline']
+    }
+    on_color = {
+        'label': 'on_yellow',
+        'pred': 'on_cyan'
+    }
+    selected_df = pred_info_df.iloc[indices]
+    selected_doc_indices = selected_df['doc_idx'].unique()
+    for doc_idx in selected_doc_indices:
+        selected_par_indices = selected_df.query("doc_idx == @doc_idx")['par_idx_in_doc'].unique()
+        doc_corpus = get_labeled_doc_corpus(doc_idx,selected_par_indices,pred_info_df)
+        print("==========\n{} doc: {} paragraph with error".format(doc_idx,len(selected_par_indices)))
+        for par_key in sorted(doc_corpus):
+            print("doc {} par[{}]".format(doc_idx,par_key))
+            par_corpus = doc_corpus[par_key]
+            cprint("Correct labeling:",attrs=['bold'])
+            for i,sent in enumerate(par_corpus['sentenses']):
+                cprint(text="{}".format(sent), on_color=on_color['label'] if par_corpus['label'][i]=='is_nar'else None,end='.')
+            cprint("\nPredicted labeling:",attrs=['bold'])
+            for i,sent in enumerate(par_corpus['sentenses']):
+                cprint(text="{}".format(sent), on_color=on_color['pred'] if par_corpus['pred'][i]=='is_nar'else None,end='.')
+            print("\n")

@@ -212,10 +212,14 @@ def print_error_par_text(indices,pred_info_df):
         for par_key in sorted(doc_corpus):
             print("doc {} par[{}]".format(doc_idx,par_key))
             par_corpus = doc_corpus[par_key]
-            cprint("Correct labeling:",attrs=['bold'])
-            for i,sent in enumerate(par_corpus['sentenses']):
-                cprint(text="{}".format(sent), on_color=on_color['label'] if par_corpus['label'][i]=='is_nar'else None,end='.')
-            cprint("\nPredicted labeling:",attrs=['bold'])
-            for i,sent in enumerate(par_corpus['sentenses']):
-                cprint(text="{}".format(sent), on_color=on_color['pred'] if par_corpus['pred'][i]=='is_nar'else None,end='.')
-            print("\n")
+            print_labeled_paragraph(par_corpus)
+            
+
+def print_labeled_paragraph(par_corpus):
+    cprint("Correct labeling:",attrs=['bold'])
+    for i,sent in enumerate(par_corpus['sentenses']):
+        cprint(text="{}".format(sent), on_color=defines.ON_COLOR['label'] if par_corpus['label'][i]=='is_nar'else None,end='.')
+    cprint("\nPredicted labeling:",attrs=['bold'])
+    for i,sent in enumerate(par_corpus['sentenses']):
+        cprint(text="{}".format(sent), on_color=defines.ON_COLOR['pred'] if par_corpus['pred'][i]=='is_nar'else None,end='.')
+    print("\n")

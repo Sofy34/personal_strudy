@@ -43,6 +43,14 @@ SAMPLE_FEATURES = [
     "TOKEN",
     "is_question",
 ]
+COLOR_MAP = {
+1: 'green',
+0: 'red'
+}
+ON_COLOR = {
+    'label': 'on_yellow',
+    'pred': 'on_cyan'
+}
 YAP_TAG_DICT = {
     "POS_TAGS_DICT": {
         "AGR-gn": "Agreement particle",

@@ -242,9 +242,9 @@ def pack_all_doc_features(seq_len = 6,step = 6):
     print("Features packed for {} docs".format(len(doc_db.index)))
     return X,y,groups
 
-def pack_doc_sentences(doc_idx):
+def pack_doc_sentences(doc_idx,neighbor_radius):
     doc_len =  len(curr_doc_db['merged'].index)
-    X_doc = [sent2features(sent_idx,sent_idx,doc_len) for sent_idx in curr_doc_db['merged'].index] 
+    X_doc = [sent2features(sent_idx,sent_idx,doc_len,neighbor_radius) for sent_idx in curr_doc_db['merged'].index] 
     # save_doc_packed_features(doc_idx,X_doc) #TBD open after solve 'Object of type int64 is not JSON serializable'
     y_doc = [sent2label(sent_idx) for sent_idx in curr_doc_db['merged'].index]
     groups_doc =  [doc_idx for i in range(len(y_doc))]
@@ -273,34 +273,34 @@ def reshape_doc_paragraphs_to_sequence_by_len(X,y,groups,seq_len,step):
     print ("doc paragraphs reshaped: from {} to {}".format(len(X),len(X_seq)))
     return X_seq,y_seq,groups_seq
 
-def pack_doc_per_paragraph(doc_idx,doc_as_sequence):
+def pack_doc_per_paragraph(doc_idx,doc_as_sequence,neighbor_radius):
     par_indices = curr_doc_db['merged']['par_idx_in_doc'].unique()
     # print("Doc {} had {} paragraphs".format(doc_idx,len(par_indices)))
-    X_doc = [par2features(par_idx,doc_as_sequence) for par_idx in par_indices] 
+    X_doc = [par2features(par_idx,doc_as_sequence,neighbor_radius) for par_idx in par_indices] 
     # save_doc_packed_features(doc_idx,X_doc) #TBD open after solve 'Object of type int64 is not JSON serializable'
     y_doc = [par2label(par_idx) for par_idx in par_indices]
     groups_doc =  [doc_idx for i in range(len(y_doc))]
     print ("{} doc {} paragraphes packed".format(doc_idx,len(par_indices)))
     return X_doc,y_doc,groups_doc
 
-def par2features(par_idx,doc_as_sequence): #doc_len is dummy variable
+def par2features(par_idx,doc_as_sequence,neighbor_radius): #doc_len is dummy variable
     par_len = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").shape[0]
     par_sentences = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").index
     doc_sent_num = len(curr_doc_db['merged'].index)
     # print("par {} has {} sentenses".format(par_idx,par_len))
     if doc_as_sequence:
-        X_par = [sent2features(sent_idx,sent_idx,doc_sent_num) for sent_idx in par_sentences] 
+        X_par = [sent2features(sent_idx,sent_idx,doc_sent_num,neighbor_radius) for sent_idx in par_sentences] 
     else:
-        X_par = [sent2features(sent_idx,idx_in_seq,par_len) for idx_in_seq,sent_idx in enumerate(par_sentences)] 
+        X_par = [sent2features(sent_idx,idx_in_seq,par_len,neighbor_radius) for idx_in_seq,sent_idx in enumerate(par_sentences)] 
     return X_par
 
-def pack_doc_per_paragraph_limit(doc_idx,limit,doc_as_sequence):# 0 means no limit
+def pack_doc_per_paragraph_limit(doc_idx,limit,doc_as_sequence,neighbor_radius):# 0 means no limit
     par_indices = curr_doc_db['merged']['par_idx_in_doc'].unique()
     X_doc = []
     y_doc = []
     groups_doc = []
     for par_idx in par_indices:
-        sub_par_x_list = par2features_limit(par_idx,limit,doc_as_sequence)
+        sub_par_x_list = par2features_limit(par_idx,limit,doc_as_sequence,neighbor_radius)
         sub_par_y_list = par2label_limit(par_idx,limit)
         for i in range(len(sub_par_x_list)):
             X_doc.append(sub_par_x_list[i])
@@ -329,7 +329,7 @@ def par2label_limit(par_idx,limit=0):
         y_par.append([sent2label(sent_idx) for sent_idx in sub_indices])
     return y_par
 
-def par2features_limit(par_idx,limit,doc_as_sequence): #limit maximum sentences per paragraph
+def par2features_limit(par_idx,limit,doc_as_sequence,neighbor_radius): #limit maximum sentences per paragraph
     par_len = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").shape[0]
     sent_indices = curr_doc_db['merged'].query("par_idx_in_doc == @par_idx").index
     doc_sent_num = len(curr_doc_db['merged'].index)
@@ -337,9 +337,9 @@ def par2features_limit(par_idx,limit,doc_as_sequence): #limit maximum sentences 
     for i in np.arange(0,par_len,limit):#0-7, 8-15....
         sub_indices = sent_indices[i:min(par_len,i+limit)]
         if doc_as_sequence:
-            sub_par = [sent2features(sent_idx,sent_idx,doc_sent_num) for sent_idx in sub_indices] 
+            sub_par = [sent2features(sent_idx,sent_idx,doc_sent_num,neighbor_radius) for sent_idx in sub_indices] 
         else:
-            sub_par = [sent2features(sent_idx,idx,len(sub_indices)) for idx,sent_idx in enumerate(sub_indices)] 
+            sub_par = [sent2features(sent_idx,idx,len(sub_indices),neighbor_radius) for idx,sent_idx in enumerate(sub_indices)] 
         X_par.append(sub_par)
     return X_par
 
@@ -405,7 +405,7 @@ def pack_all_doc_sentences(per_par=False,tf_types = ['word','char_wb']):
     print("{} sentenced packed for {} docs".format(len(X),len(sent_lemma_db_list)))
     return X,y,groups
 
-def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,sent_lemma_db_list=[],tf_types = ['word','char_wb']):
+def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,neighbor_radius=2,sent_lemma_db_list=[],tf_types = ['word','char_wb']):
     docs_map = {}
     if len(sent_lemma_db_list) ==0:
         sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, dir_name,"*_sent_lemma_db.csv"))    
@@ -416,11 +416,11 @@ def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence
         docs_map[doc_idx] = {}
         if per_par:
             if limit == 0:
-                X_doc,y_doc,groups_doc =  pack_doc_per_paragraph(doc_idx,doc_as_sequence)
+                X_doc,y_doc,groups_doc =  pack_doc_per_paragraph(doc_idx,doc_as_sequence,neighbor_radius)
             else:
-                X_doc,y_doc,groups_doc = pack_doc_per_paragraph_limit(doc_idx,limit,doc_as_sequence)
+                X_doc,y_doc,groups_doc = pack_doc_per_paragraph_limit(doc_idx,limit,doc_as_sequence,neighbor_radius)
         else:
-            X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx)
+            X_doc,y_doc,groups_doc =  pack_doc_sentences(doc_idx,neighbor_radius)
         docs_map[doc_idx]['X'] = X_doc
         docs_map[doc_idx]['y']= y_doc
         docs_map[doc_idx]['groups'] = groups_doc
@@ -430,8 +430,51 @@ def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence
     print("{} items packed for {} docs".format(total_sent,len(docs_map.keys())))
     return docs_map
 
-
 def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2):
+    global curr_doc_db
+    features = {}
+    columns =  list(curr_doc_db['merged'].columns.values)
+    columns.remove('is_nar')
+    # print ("Parsing sent idx {} idx_in_seq {} seq_len {}".format(sent_idx,idx_in_seq,seq_len))
+    for col in columns:
+        if save_feature_value(curr_doc_db['merged'].loc[sent_idx,col],col):
+            features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col]
+    
+    for neighbor_dist in range(1,neighbor_radius+1):
+        if idx_in_seq > neighbor_dist - 1:
+            update = {}
+            for col in columns:
+                if save_feature_value(curr_doc_db['merged'].loc[sent_idx-neighbor_dist,col],col):
+                    update["-{}:{}".format(neighbor_dist,col)]=curr_doc_db['merged'].loc[sent_idx-neighbor_dist,col]
+            features.update(update)
+        if idx_in_seq < seq_len - neighbor_dist:
+            update = {}
+            for col in columns:
+                if save_feature_value(curr_doc_db['merged'].loc[sent_idx+neighbor_dist,col],col):
+                    update["+{}:{}".format(neighbor_dist,col)]=curr_doc_db['merged'].loc[sent_idx+neighbor_dist,col]
+            features.update(update)
+
+    update = {}
+    for neighbor_dist in range(1,neighbor_radius+1):
+        if idx_in_seq > neighbor_dist - 1:
+            update["-{}.sim".format(neighbor_dist)]=curr_doc_db['sim_vec'].iloc[sent_idx,sent_idx-neighbor_dist]
+        if idx_in_seq < seq_len - neighbor_dist:
+            update["+{}.sim".format(neighbor_dist)]=curr_doc_db['sim_vec'].iloc[sent_idx,sent_idx+neighbor_dist]
+
+    features.update(update) 
+    
+    update = {}
+    for tf_type in defines.TF_TYPES:
+        tf_str = 'tfidf_{}'.format(tf_type)
+        if  tf_str in curr_doc_db.keys():
+            tfidf_feature_indices = curr_doc_db[tf_str][sent_idx,:].nonzero()[1]
+            for i in tfidf_feature_indices:
+                update["{}_{}".format(tf_str,i)] = curr_doc_db[tf_str][sent_idx,i]
+            features.update(update)
+
+    return features
+
+def sent2features_orig(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2):
     global curr_doc_db
     features = {}
     columns =  list(curr_doc_db['merged'].columns.values)

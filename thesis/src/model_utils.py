@@ -195,6 +195,7 @@ def get_labeles_par_corpus(par_idx, doc_db):
     par_corpus["pred"] = par_db["pred"].tolist()
     par_corpus["label"] = par_db["label"].tolist()
     par_corpus["is_nar"] = par_db["is_nar"].tolist()
+    par_corpus["pred_proba"] = par_db["pred_proba"].tolist()
     return par_corpus
 
 
@@ -214,7 +215,7 @@ def get_labeled_doc_corpus(doc_idx, selected_par_indices, pred_info_df):
     return doc_corpus
 
 
-def print_error_par_text(indices, pred_info_df):
+def print_error_par_text(indices, pred_info_df,print_proba):
     global error_compare_file
     color_map = {1: "green", 0: "red"}
     nar_args = {1: ["underline"]}
@@ -237,13 +238,13 @@ def print_error_par_text(indices, pred_info_df):
             par_corpus = doc_corpus[par_key]
             # print_labeled_paragraph(par_corpus)
             par_columns = print_labeled_paragraph_by_columns(
-                doc_idx, par_key, par_corpus, colored_df
+                doc_idx, par_key, par_corpus,print_proba
             )
             colored_df = pd.concat([colored_df, par_columns], ignore_index=True)
     colored_df["doc_idx"] = colored_df["doc_idx"].astype(int)
     colored_df["par_idx"] = colored_df["par_idx"].astype(int)
     html = colored_df.to_html(escape=False, justify="center")
-    html = r'<link rel="stylesheet" type="text/css" href="df_style.css" />\n' + html
+    html = r'<link rel="stylesheet" type="text/css" href="df_style.css" /><br>' + html
     # write html to file
     text_file = open("error_analysis.html", "w")
     text_file.write(html)
@@ -273,25 +274,29 @@ def print_labeled_paragraph(par_corpus):
     print("\n")
 
 
-def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, colored_df):
+def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba):
     par_columns = pd.DataFrame()
     corr_par = ""
     pred_par = ""
+    start = "<span class="
     corr_style = {
-        "is_nar": "<span class='parStyle corrStyle'>",
-        "not_nar": "<span class='parStyle'>",
+        "is_nar": start + "'corrStyle'>",
+        "not_nar": "<span>"
     }
     pred_style = {
-        "is_nar": "<span class='parStyle predStyle'>",
-        "not_nar": "<span class='parStyle'>",
+        "is_nar": start + "'predStyle'>",
+        "not_nar": "<span>",
     }
 
     end = "</span>"
-
+    bold_style = start + "'bold'>"
     for i, sent in enumerate(par_corpus["sentenses"]):
-        corr_par += ".".join([corr_style[par_corpus["label"][i]], sent, end])
-        pred_par += ".".join([pred_style[par_corpus["pred"][i]], sent, end])
-    corr_par = "<p class='parStyle>" + corr_par + "</p>"
+        if print_proba:
+            conf_score = bold_style + "{:.2f} ".format(par_corpus["pred_proba"][i]) + end + " "
+        else:
+            conf_score = ""
+        corr_par += "".join([conf_score,corr_style[par_corpus["label"][i]],sent,end]) + ". "
+        pred_par += "".join([conf_score,pred_style[par_corpus["pred"][i]],sent,end])+ ". "
     par_columns.loc[0, "doc_idx"] = int(doc_idx)
     par_columns.loc[0, "par_idx"] = int(par_idx)
     par_columns.loc[0, "correct"] = corr_par

@@ -9,3 +9,7 @@
 td {
   text-align: right;
 }
+
+.bold {
+    font-weight: bold;
+}

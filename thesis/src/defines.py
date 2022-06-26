@@ -25,7 +25,7 @@ JOIN_WITH_NEXT = [
 ]
 JOIN_WITH_PREV = ["זהו", "וזהו"]
 MIN_SENT_LEN = 3
-TF_TYPES = ["word", "char", "char_wb"]
+TF_TYPES = ["word", "char", "char_wb", "lemma"]
 # TF_TYPES = []
 SENT_FEATURES = [
     "is_nar",
@@ -34,6 +34,8 @@ SENT_FEATURES = [
     "par_idx_in_doc",
     "sent_idx_in_par",
     "is_question",
+    "sent_pos_in_par",
+    "sent_pos_in_doc",
 ]
 SAMPLE_FEATURES = [
     "sent_len",
@@ -42,15 +44,11 @@ SAMPLE_FEATURES = [
     "par_idx_in_doc",
     "TOKEN",
     "is_question",
+    "sent_pos_in_par",
+    "sent_pos_in_doc",
 ]
-COLOR_MAP = {
-1: 'green',
-0: 'red'
-}
-ON_COLOR = {
-    'label': 'on_yellow',
-    'pred': 'on_cyan'
-}
+COLOR_MAP = {1: "green", 0: "red"}
+ON_COLOR = {"label": "on_yellow", "pred": "on_cyan"}
 YAP_TAG_DICT = {
     "POS_TAGS_DICT": {
         "AGR-gn": "Agreement particle",

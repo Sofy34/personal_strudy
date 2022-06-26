@@ -324,13 +324,14 @@ def save_df_to_csv(df_name, is_global=True):
         return 0
 
 
-def save_doc_blocks(doc_idx_from_name):
+def save_doc_blocks(dir_name,doc_idx_from_name):
     global par_db, block_db
     block_db = pd.DataFrame()
     par_db = pd.read_csv(
         os.path.join(
             os.getcwd(),
             defines.PATH_TO_DFS,
+            dir_name,
             "{:02d}_par_db.csv".format(doc_idx_from_name),
         )
     )
@@ -341,6 +342,7 @@ def save_doc_blocks(doc_idx_from_name):
         os.path.join(
             os.getcwd(),
             defines.PATH_TO_DFS,
+            dir_name,
             "{:02d}_block_db.csv".format(doc_idx_from_name),
         ),
         index=False,
@@ -349,13 +351,19 @@ def save_doc_blocks(doc_idx_from_name):
     # print("Doc {} blocks saved".format(doc_idx_from_name))
 
 
-def save_doc_sentences(doc_idx_from_name,merge_short_sent):
+
+def calc_position_in_grp(x):
+    return ((x+1)/len(x))
+
+
+def save_doc_sentences(dir_name,doc_idx_from_name,merge_short_sent):
     global block_db, sent_db
     sent_db = pd.DataFrame()
     block_db = pd.read_csv(
         os.path.join(
             os.getcwd(),
             defines.PATH_TO_DFS,
+            dir_name,
             "{:02d}_block_db.csv".format(doc_idx_from_name),
         )
     )
@@ -365,10 +373,13 @@ def save_doc_sentences(doc_idx_from_name,merge_short_sent):
     # add_sent_column_for_labels()
     get_dummies_is_client()
     sent_db["sent_idx_in_par"] = sent_db.groupby("par_idx_in_doc").cumcount()
+    sent_db['sent_pos_in_par'] = sent_db.groupby('par_idx_in_doc')['sent_idx_in_par'].transform(calc_position_in_grp)
+    sent_db['sent_pos_in_doc'] = (sent_db.index.values+1)/len(sent_db.index)
     sent_db.to_csv(
         os.path.join(
             os.getcwd(),
             defines.PATH_TO_DFS,
+            dir_name,
             "{:02d}_sent_db.csv".format(doc_idx_from_name),
         ),
         index=False,
@@ -385,7 +396,7 @@ def save_doc_sentences(doc_idx_from_name,merge_short_sent):
     del sent_db
 
 
-def save_doc_paragraphs(doc_idx_from_name):
+def save_doc_paragraphs(dir_name,doc_idx_from_name):
     global par_db, doc_db
     inside_narrative = 0
     doc_path = doc_db.loc[get_dbIdx_by_docIdx(doc_idx_from_name), "path"].values[0]
@@ -422,6 +433,7 @@ def save_doc_paragraphs(doc_idx_from_name):
         os.path.join(
             os.getcwd(),
             defines.PATH_TO_DFS,
+            dir_name,
             "{:02d}_par_db.csv".format(doc_idx_from_name),
         ),
         index=False,
@@ -528,7 +540,7 @@ def get_par_type_erase(par):
     return par, par_type
 
 
-def parse_all_docs(merge_short_sent,doc_path_list=None):
+def parse_all_docs(dir_name,merge_short_sent,doc_path_list=None):
     global doc_db, debug_db
     save_docs_db(doc_path_list)
     doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
@@ -537,7 +549,7 @@ def parse_all_docs(merge_short_sent,doc_path_list=None):
     doc_indices = doc_db["doc_idx_from_name"].values
     doc_indices.sort()
     for i, doc_idx in enumerate(doc_indices):
-        parse_doc(int(doc_idx),merge_short_sent)
+        parse_doc(dir_name,int(doc_idx),merge_short_sent)
         print("Finished doc {} of {}".format(i, len(doc_db.index)))
     doc_db.to_csv(
         os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv"), index=False
@@ -549,15 +561,15 @@ def parse_all_docs(merge_short_sent,doc_path_list=None):
     del debug_db
 
 
-def parse_doc(doc_idx, merge_short_sent, single=False):
+def parse_doc(dir_name,doc_idx, merge_short_sent, single=False):
     global doc_db, debug_db
     if single:
         doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
         doc_db = pd.read_csv(doc_db_path)
         debug_db = pd.DataFrame()
-    save_doc_paragraphs(doc_idx)
-    save_doc_blocks(doc_idx)
-    save_doc_sentences(doc_idx,merge_short_sent)
+    save_doc_paragraphs(dir_name,doc_idx)
+    save_doc_blocks(dir_name,doc_idx)
+    save_doc_sentences(dir_name,doc_idx,merge_short_sent)
     if single:
         debug_db.to_csv(
             os.path.join(os.getcwd(), defines.PATH_TO_DFS, "debug_db.csv"), index=False

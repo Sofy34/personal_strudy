@@ -27,6 +27,7 @@ JOIN_WITH_PREV = ["זהו", "וזהו"]
 MIN_SENT_LEN = 3
 TF_TYPES = ["word", "char", "char_wb", "lemma"]
 # TF_TYPES = []
+TEST_PERSENT = 0.2
 SENT_FEATURES = [
     "is_nar",
     "is_client",

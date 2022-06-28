@@ -8,10 +8,11 @@ from sklearn_crfsuite import metrics
 from sklearn_crfsuite.metrics import flat_classification_report
 import os
 from termcolor import colored, cprint
+import json
 
 
 global error_compare_file
-
+global tf_features
 
 def get_info_on_pred(y_pred, y_pred_proba, y_test, groups_test):
     pred_df = pd.DataFrame()
@@ -215,7 +216,7 @@ def get_labeled_doc_corpus(doc_idx, selected_par_indices, pred_info_df):
     return doc_corpus
 
 
-def print_error_par_text(indices, pred_info_df,print_proba):
+def print_error_par_text(indices, pred_info_df, print_proba):
     global error_compare_file
     color_map = {1: "green", 0: "red"}
     nar_args = {1: ["underline"]}
@@ -238,7 +239,7 @@ def print_error_par_text(indices, pred_info_df,print_proba):
             par_corpus = doc_corpus[par_key]
             # print_labeled_paragraph(par_corpus)
             par_columns = print_labeled_paragraph_by_columns(
-                doc_idx, par_key, par_corpus,print_proba
+                doc_idx, par_key, par_corpus, print_proba
             )
             colored_df = pd.concat([colored_df, par_columns], ignore_index=True)
     colored_df["doc_idx"] = colored_df["doc_idx"].astype(int)
@@ -279,10 +280,7 @@ def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba
     corr_par = ""
     pred_par = ""
     start = "<span class="
-    corr_style = {
-        "is_nar": start + "'corrStyle'>",
-        "not_nar": "<span>"
-    }
+    corr_style = {"is_nar": start + "'corrStyle'>", "not_nar": "<span>"}
     pred_style = {
         "is_nar": start + "'predStyle'>",
         "not_nar": "<span>",
@@ -292,14 +290,72 @@ def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba
     bold_style = start + "'bold'>"
     for i, sent in enumerate(par_corpus["sentenses"]):
         if print_proba:
-            conf_score = bold_style + "{:.2f} ".format(par_corpus["pred_proba"][i]) + end + " "
+            conf_score = (
+                bold_style + "{:.2f} ".format(par_corpus["pred_proba"][i]) + end + " "
+            )
         else:
             conf_score = ""
-        corr_par += "".join([conf_score,corr_style[par_corpus["label"][i]],sent,end]) + ". "
-        pred_par += "".join([conf_score,pred_style[par_corpus["pred"][i]],sent,end])+ ". "
+        corr_par += (
+            "".join([conf_score, corr_style[par_corpus["label"][i]], sent, end]) + ". "
+        )
+        pred_par += (
+            "".join([conf_score, pred_style[par_corpus["pred"][i]], sent, end]) + ". "
+        )
     par_columns.loc[0, "doc_idx"] = int(doc_idx)
     par_columns.loc[0, "par_idx"] = int(par_idx)
     par_columns.loc[0, "correct"] = corr_par
     par_columns.loc[0, "predicted"] = pred_par
 
     return par_columns
+
+
+class ByDocFold:
+    def __init__(self, n_splits=3):
+        self.n_splits = n_splits
+
+    def split(self, X, y, groups=None):
+        doc_indices = set(groups)
+        doc_count = len(doc_indices)
+        test_count = int(defines.TEST_PERSENT * doc_count)
+        for i in range(self.n_splits):
+            test_docs = set(random.sample(doc_indices, test_count))
+            train_docs = doc_indices - test_docs
+            train_idx = [i for i, j in enumerate(groups) if j in train_docs]
+            test_idx = [i for i, j in enumerate(groups) if j in test_docs]
+            yield train_idx, test_idx
+
+    def get_n_splits(self, X, y, groups=None):
+        return self.n_splits
+
+def get_tf_string(attr):
+    global tf_features
+    string = ""
+    if 'tfidf' in attr:
+        splitted = attr.split("_")
+        if 'char' in attr:
+            tf_type = 'char_wb'
+        else:
+            tf_type = splitted[1]
+        tf_idx = int(splitted[-1])
+        string = tf_features[tf_type][tf_idx]
+    return string
+
+def get_features_df(dir_name,features,is_dic=False):
+    global tf_features
+    json_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"tf_features_map.json")
+    with open(json_path, 'r') as fp:
+        tf_features = json.load(fp)
+    features_df = pd.DataFrame()
+    
+    if is_dic:
+        features_df['weight'] = features.values()
+        features_df['label'] = [key[1] for key in list(features.keys())]
+        features_df['attr'] = [key[0] for key in list(features.keys())]
+    else:
+        features_df['weight'] =  [key[1] for key in features]
+        features_df['label'] = [key[0][1] for key in features]
+        features_df['attr'] = [key[0][0] for key in features]
+    features_df['string'] = features_df['attr'].transform(get_tf_string)
+    del tf_features
+    return features_df
+

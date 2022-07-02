@@ -9,9 +9,27 @@ from transformers import AutoModel, BertTokenizerFast
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from transformers import AdamW
 from sklearn.utils.class_weight import compute_class_weight
+import sys
+sys.path.append('./src/')
+import model_utils
+import random
+import torch.nn.functional as F
 
 # specify GPU
 # device = torch.device("cuda")
+
+def train_test_split_doc(doc_indices,test_percent,random_state=42):
+    doc_count = len(doc_indices)
+    test_count = int(test_percent * doc_count)
+    random.seed(random_state)
+    test_docs = set(random.sample(doc_indices, test_count))
+    train_docs = doc_indices - test_docs
+    return train_docs,test_docs
+
+def get_text_label_by_doc(df,doc_indices):
+    selected_docs = df[df['doc_idx'].isin(doc_indices)]
+    return selected_docs['text'],selected_docs['is_nar']
+
 def split_train_val_test(df):
     train_text, temp_text, train_labels, temp_labels = train_test_split(df['text'], df['is_nar'], 
                                                                         random_state=2018, 
@@ -24,6 +42,26 @@ def split_train_val_test(df):
                                                                     test_size=0.5, 
                                                                     stratify=temp_labels)
     return train_text, train_labels, val_text, test_text, val_labels, test_labels
+
+
+def split_train_val_test_per_doc(df):
+    doc_indices = set(df['doc_idx'].unique())
+    train_docs,temp_docs = train_test_split_doc(doc_indices,0.3)
+    train_text, train_labels = get_text_label_by_doc(df,train_docs)
+
+    val_docs,test_docs = train_test_split_doc(temp_docs,0.5)
+    val_text,  val_labels = get_text_label_by_doc(df,val_docs)
+    test_text, test_labels = get_text_label_by_doc(df,test_docs)
+    return train_text, train_labels, val_text, test_text, val_labels, test_labels, test_docs
+
+def get_test_tokens(my_tokenizer,test_text,my_max_len = 30):
+    tokens_test = my_tokenizer.batch_encode_plus(
+        test_text.tolist(),
+        max_length = my_max_len,
+        pad_to_max_length=True,
+        truncation=True
+    )
+    return tokens_test
 
 def get_train_val_test_tokens(my_tokenizer,train_text,val_text,test_text,my_max_len = 30):
     tokens_train = my_tokenizer.batch_encode_plus(
@@ -69,6 +107,14 @@ def covert_token2tensor(tokens_train,train_labels,tokens_val,val_labels,tokens_t
     tensor_map['test']['seq'] = torch.tensor(tokens_test['input_ids'])
     tensor_map['test']['mask'] = torch.tensor(tokens_test['attention_mask'])
     # test_y = torch.tensor(test_labels.tolist())
+    tensor_map['test']['y'] = torch.tensor(test_labels.tolist(),dtype=torch.long )
+    return tensor_map
+
+def covert_test_token2tensor(tokens_test,test_labels):
+    tensor_map = {}
+    tensor_map['test'] = {}
+    tensor_map['test']['seq'] = torch.tensor(tokens_test['input_ids'])
+    tensor_map['test']['mask'] = torch.tensor(tokens_test['attention_mask'])
     tensor_map['test']['y'] = torch.tensor(test_labels.tolist(),dtype=torch.long )
     return tensor_map
 
@@ -159,7 +205,7 @@ def get_optimizer(wrapped_model):
     return optimizer
 
 def get_cross_entropy(train_labels):
-    class_weights = compute_class_weight('balanced', np.unique(train_labels), train_labels)
+    class_weights = compute_class_weight(class_weight='balanced', classes=np.unique(train_labels), y=train_labels)
     print("Class Weights:",class_weights)
     # converting list of class weights to a tensor
     weights= torch.tensor(class_weights,dtype=torch.float)
@@ -328,6 +374,8 @@ def get_prediction(model,test_map):
     # get predictions for test data
     with torch.no_grad():
         preds = model(test_map['seq'], test_map['mask'])
-        preds = preds.detach().cpu().numpy()
-        preds = np.argmax(preds, axis = 1)
-    return preds
+        preds_np = preds.detach().cpu().numpy()
+        preds_label = np.argmax(preds_np, axis = 1)
+        
+        preds_proba =  F.softmax(preds, dim=-1).detach().cpu().numpy()
+    return preds_label,preds_proba

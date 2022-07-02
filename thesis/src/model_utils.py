@@ -53,6 +53,11 @@ def flatten_sequence(samples, groups_test, pred_df):
 def get_max_predicted_prob(y_pred_proba_flat):
     return [max(sample.values()) for sample in (y_pred_proba_flat)]
 
+def get_predicted_prob_from_dict(y_pred_proba_flat):
+    pr_arr = np.zeros((len(y_pred_proba_flat),2))
+    pr_arr[:,0] = [sample['not_nar'] for sample in y_pred_proba_flat]
+    pr_arr[:,1] = [sample['is_nar'] for sample in y_pred_proba_flat]
+    return pr_arr
 
 def get_sample_info(X_test, _pred_df):
     """[summary]
@@ -152,6 +157,24 @@ def split_test_train_docs(docs_map, test_percent, seq_len, step, seed=None):
     return X_train, y_train, X_test, y_test, test_idx, groups_train, groups_test
 
 
+
+def get_X_y_by_doc_indices(docs_map,doc_indices,seq_len,step):
+    X = []
+    y = []
+    groups = []
+    if isinstance(docs_map,dict):
+        for idx in doc_indices:
+            X.extend(docs_map[str(idx)]["X_{}_{}".format(seq_len, step)])
+            y.extend(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)])
+            groups.extend(
+                [idx for i in range(len(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)]))]
+            )
+    elif isinstance(docs_map,pd.DataFrame):
+        X = docs_map[docs_map['doc_idx'].isin(doc_indices)].drop(['doc_idx','sent_idx','is_nar'],axis=1)
+        y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
+        groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
+    return X,y,groups
+        
 def manual_groups_validate(docs_map, test_percent, seq_len, step, num_splits=10):
     score_list = []
     for i in range(num_splits):

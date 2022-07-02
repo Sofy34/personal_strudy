@@ -29,6 +29,7 @@ from sklearn.model_selection import LeaveOneGroupOut,LeavePGroupsOut,GroupKFold
 
 import itertools
 import common_utils
+from termcolor import colored, cprint
 
 regressors_instance = {}
 regressors_prediction = {}
@@ -695,10 +696,11 @@ def run_model(db):
     print(classification_report(y_test, y_pred))
 
 
-def get_prediction_report(y_test,y_pred,labels):
+def get_prediction_report(y_test,y_pred,labels,title=""):
     # ConfusionMatrixDisplay.from_predictions(y_test, y_pred,cmap='gray_r')
     cm = confusion_matrix(y_test, y_pred, labels = labels)
     disp = ConfusionMatrixDisplay(confusion_matrix=cm, display_labels = labels)
+    cprint("{}".format(title),None, 'on_cyan',attrs=["bold"])
     print(classification_report(y_test, y_pred,labels=labels))
     disp.plot(cmap='gray_r')
 

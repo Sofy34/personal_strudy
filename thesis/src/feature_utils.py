@@ -114,7 +114,7 @@ def tfidf_transform_doc(dir_name,doc_idx,tfidf,per_lemma=True):
     return tfidf.transform(corpus)
 
 
-def tfidf_fit(dir_name,per_word = True, per_lemma = True, analyzer = 'char',n_min = 3, n_max = 5, min_df = 5):
+def tfidf_fit(dir_name,per_word = True, per_lemma = True, analyzer = 'char',n_min = 3, n_max = 5, min_df = 5, stop_words=[]):
     data_list =  []
     if per_word:
         if per_lemma:
@@ -124,19 +124,19 @@ def tfidf_fit(dir_name,per_word = True, per_lemma = True, analyzer = 'char',n_mi
             corpus = get_all_doc_sentenses(dir_name)
             col_name = 'text'
         data_list = corpus[col_name].tolist()
-        tfidf = TfidfVectorizer(lowercase=False)
+        tfidf = TfidfVectorizer(lowercase=False,stop_words=stop_words)
     else:
         corpus = get_all_doc_sentenses(dir_name)
         data_list = corpus['text'].tolist()
         tfidf = TfidfVectorizer(lowercase=False,
         analyzer = analyzer,
         ngram_range = (n_min,n_max),
-        min_df = min_df
+        min_df = min_df,
         )
     return tfidf.fit(data_list)
 
-def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyzer = 'char'):
-    tf = tfidf_fit(dir_name,per_word,per_lemma,analyzer)
+def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyzer = 'char',stop_words=[]):
+    tf = tfidf_fit(dir_name=dir_name,per_word=per_word,per_lemma=per_lemma,analyzer=analyzer,stop_words=stop_words)
     tf_params = tf.get_params()
     tf_string = tf_params['analyzer'] if per_lemma==False else "lemma"
     print("TfIdf {} vocab size {}".format(tf_string,len(tf.vocabulary_)))
@@ -201,9 +201,9 @@ def merge_sent_pos_db(dir_name,doc_idx):
 ### Pack sentense features for CRF  ###
 
 curr_doc_db = {}
-def load_doc_features(dir_name,doc_idx,tf_types = ['word','char_wb','lemma']):
+def load_doc_features(dir_name,doc_idx,tf_types = ['word','char_wb','lemma'],merged_str="merged_db"):
     global curr_doc_db
-    curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_merged_db.csv".format(doc_idx)))
+    curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_{}.csv".format(doc_idx,merged_str)))
     curr_doc_db['sim_vec']  = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_sim_vec300_db.csv".format(doc_idx)))
     for tf_type in tf_types:
         curr_doc_db['tfidf_{}'.format(tf_type)] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}.npz".format(doc_idx,tf_type)))
@@ -407,14 +407,14 @@ def pack_all_doc_sentences(per_par=False,tf_types = ['word','char_wb']):
     print("{} sentenced packed for {} docs".format(len(X),len(sent_lemma_db_list)))
     return X,y,groups
 
-def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,neighbor_radius=2,sent_lemma_db_list=[],tf_types = ['word','char_wb']):
+def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,neighbor_radius=2,sent_lemma_db_list=[],tf_types = ['word','char_wb'],merged_str="merged_db"):
     docs_map = {}
     if len(sent_lemma_db_list) ==0:
         sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, dir_name,"*_sent_lemma_db.csv"))    
     total_sent = 0
     for i,doc_name in enumerate(sent_lemma_db_list):
         doc_idx = common_utils.get_doc_idx_from_name(doc_name) 
-        load_doc_features(dir_name,doc_idx,tf_types)
+        load_doc_features(dir_name,doc_idx,tf_types,merged_str)
         docs_map[doc_idx] = {}
         if per_par:
             if limit == 0:
@@ -441,7 +441,8 @@ def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2):
     for col in columns:
         if save_feature_value(curr_doc_db['merged'].loc[sent_idx,col],col):
             features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col].item()
-    features['sent_idx'] = sent_idx
+        # features["{}".format(col)]= curr_doc_db['merged'].loc[sent_idx,col].item()
+    # features['sent_idx'] = sent_idx
 
 
     for neighbor_dist in range(1,neighbor_radius+1):
@@ -450,12 +451,14 @@ def sent2features(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2):
             for col in columns:
                 if save_feature_value(curr_doc_db['merged'].loc[sent_idx-neighbor_dist,col],col):
                     update["-{}:{}".format(neighbor_dist,col)]=curr_doc_db['merged'].loc[sent_idx-neighbor_dist,col].item()
+                # update["-{}:{}".format(neighbor_dist,col)]=curr_doc_db['merged'].loc[sent_idx-neighbor_dist,col].item()
             features.update(update)
         if idx_in_seq < seq_len - neighbor_dist:
             update = {}
             for col in columns:
                 if save_feature_value(curr_doc_db['merged'].loc[sent_idx+neighbor_dist,col],col):
                     update["+{}:{}".format(neighbor_dist,col)]=curr_doc_db['merged'].loc[sent_idx+neighbor_dist,col].item()
+                # update["+{}:{}".format(neighbor_dist,col)]=curr_doc_db['merged'].loc[sent_idx+neighbor_dist,col].item()                   
             features.update(update)
 
     update = {}

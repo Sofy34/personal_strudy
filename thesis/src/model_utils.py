@@ -9,7 +9,10 @@ from sklearn_crfsuite.metrics import flat_classification_report
 import os
 from termcolor import colored, cprint
 import json
-
+import pandas as pd
+from sklearn.base import BaseEstimator, TransformerMixin
+from sklearn.pipeline import Pipeline
+from sklearn.model_selection import _validation
 
 global error_compare_file
 global tf_features
@@ -174,6 +177,12 @@ def get_X_y_by_doc_indices(docs_map,doc_indices,seq_len,step):
         y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
         groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
     return X,y,groups
+
+def get_y_by_doc_indices(docs_map,doc_indices,seq_len,step):
+    y=[]
+    for idx in doc_indices:
+        y.extend(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)])
+    return y
         
 def manual_groups_validate(docs_map, test_percent, seq_len, step, num_splits=10):
     score_list = []
@@ -392,3 +401,114 @@ def get_features_df(dir_name, features, is_dic=False):
     features_df["string"] = features_df["attr"].transform(get_tf_string)
     del tf_features
     return features_df
+
+class CrfTransformer(BaseEstimator, TransformerMixin):
+
+  def __init__(self,seq_len=3,step=3):#,dir_name):
+    self.seq_len = seq_len
+    self.step = step
+    # self.dir_name=dir_name
+    # json_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,self.dir_name,"docs_map.json")
+    # with open(json_path, 'r') as fp:
+    #     self.docs_map = json.load(fp)
+    print('\n>>>>>>>init() called.\n')
+
+
+  def fit(self, X, indices = None):
+    print('\n>>>>>>>fit() called.\n')
+    
+    return self
+
+  def transform(self, X, indices = None):
+    print('\n>>>>>>>transform() called.\n')
+    X_=[]
+    y_ =[]
+    for doc in indices:
+        X_.extend(X[doc]["X_{}_{}".format(self.seq_len, self.step)])
+        y_.extend(X[doc]["y_{}_{}".format(self.seq_len, self.step)])
+    return X_, y_
+
+
+
+
+def add_sent_to_docs_map(dir_name,docs_map):
+    for key in docs_map.keys():
+        sent_db_path = os.path.join(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_db.csv".format(int(key))))
+        sent_db = pd.read_csv(sent_db_path,usecols=['text','is_nar'])
+        docs_map[key]['text'] = sent_db['text'].tolist()
+    
+
+
+
+
+def get_crf_pipe(crfTrandform,crfClf):
+    crf_pipe= Pipeline(steps=[('preprocessor', crfTrandform()), ('classifier', crfClf)])
+    return crf_pipe
+
+def get_bert_pipe(bertTrandform,bertClf):
+    bert_pipe= Pipeline(steps=[('preprocessor', bertTrandform()), ('classifier', bertClf)])
+    return bert_pipe
+
+def my_fit_and_score(
+    estimator_pipe,
+    docs_map,
+    scorer,
+    train_idx,
+    test_idx):
+    
+    result = {}
+    estimator_pipe.fit(docs_map,train_idx)
+    test_scores = estimator_pipe.score(docs_map,test_idx)
+    result["test_scores"] = test_scores
+    return results
+
+def manual_cross_validate(
+    estimator,
+    docs_map,
+    scoring=None,
+    cv=None,
+    n_jobs=None,
+    verbose=0,
+    fit_params=None,
+    pre_dispatch="2*n_jobs",
+    return_train_score=False,
+    return_estimator=False,
+    error_score=np.nan,
+):
+
+
+
+    # We clone the estimator to make sure that all the folds are
+    # independent, and that it is pickle-able.
+    parallel = Parallel(n_jobs=n_jobs, verbose=verbose, pre_dispatch=pre_dispatch)
+    results = parallel(
+        delayed(my_fit_and_score)(
+            clone(estimator),
+            docs_map,
+            scoring,
+            train,
+            test
+        )
+        for train, test in cv.split(X, y, groups)
+    )
+
+    results = _validation._aggregate_score_dicts(results)
+
+    ret = {}
+    ret["fit_time"] = results["fit_time"]
+    ret["score_time"] = results["score_time"]
+
+    if return_estimator:
+        ret["estimator"] = results["estimator"]
+
+    test_scores_dict = _validation._normalize_score_results(results["test_scores"])
+    if return_train_score:
+        train_scores_dict = _validation._normalize_score_results(results["train_scores"])
+
+    for name in test_scores_dict:
+        ret["test_%s" % name] = test_scores_dict[name]
+        if return_train_score:
+            key = "train_%s" % name
+            ret[key] = train_scores_dict[name]
+
+    return ret

@@ -124,6 +124,8 @@ def count_words(text):
     return len(text.split())
 
 
+
+
 def split_block_to_sentences(text, merge_short):
     text = remove_lr_annotation(text)
     # important to remove before we split into sentences
@@ -170,7 +172,7 @@ def add_sentences_of_blocks_to_db(block_db_idx,merge_short_sent):
             continue
         curr_db_idx = sent_db.shape[0]
         sent_db.loc[curr_db_idx, "is_question"] = 1 if "?" in sentence else 0
-        # sent_db.loc[curr_db_idx,'text'] = re.sub(r'\?','',sentence)
+        sent_db.loc[curr_db_idx,'text'] = re.sub(r'\?','',sentence)
         sent_db.loc[curr_db_idx, "text"] = sentence
         sent_db.loc[curr_db_idx, "sent_idx_in_block"] = i
         sent_db.loc[curr_db_idx, "block_idx"] = block_db_idx

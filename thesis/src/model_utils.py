@@ -14,6 +14,12 @@ from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.pipeline import Pipeline
 from sklearn.model_selection import _validation
 
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.utils.multiclass import unique_labels
+from sklearn.metrics import euclidean_distances
+from joblib import Parallel, logger
+from sklearn.utils.fixes import delayed
 global error_compare_file
 global tf_features
 
@@ -56,11 +62,13 @@ def flatten_sequence(samples, groups_test, pred_df):
 def get_max_predicted_prob(y_pred_proba_flat):
     return [max(sample.values()) for sample in (y_pred_proba_flat)]
 
+
 def get_predicted_prob_from_dict(y_pred_proba_flat):
-    pr_arr = np.zeros((len(y_pred_proba_flat),2))
-    pr_arr[:,0] = [sample['not_nar'] for sample in y_pred_proba_flat]
-    pr_arr[:,1] = [sample['is_nar'] for sample in y_pred_proba_flat]
+    pr_arr = np.zeros((len(y_pred_proba_flat), 2))
+    pr_arr[:, 0] = [sample['not_nar'] for sample in y_pred_proba_flat]
+    pr_arr[:, 1] = [sample['is_nar'] for sample in y_pred_proba_flat]
     return pr_arr
+
 
 def get_sample_info(X_test, _pred_df):
     """[summary]
@@ -117,7 +125,8 @@ def retrive_predicted_sent(dir_name, pred_df, groups_test, X_test):
                 "par_idx_in_doc == @err_sent['par_idx_in_doc'] & sent_idx_in_par == @err_sent['sent_idx_in_par']"
             )
             if len(sent_info.index) != 1:
-                print("ERROR! Got {} sentenses matching".format(len(sent_info.index)))
+                print("ERROR! Got {} sentenses matching".format(
+                    len(sent_info.index)))
             for feature in sent_features:
                 pred_df_data.loc[index, feature] = sent_info[feature].values
             pred_df_data.loc[index, "TOKEN"] = err_sent["TOKEN"]
@@ -149,41 +158,46 @@ def split_test_train_docs(docs_map, test_percent, seq_len, step, seed=None):
         X_train.extend(docs_map[idx]["X_{}_{}".format(seq_len, step)])
         y_train.extend(docs_map[idx]["y_{}_{}".format(seq_len, step)])
         groups_train.extend(
-            [idx for i in range(len(docs_map[idx]["y_{}_{}".format(seq_len, step)]))]
+            [idx for i in range(
+                len(docs_map[idx]["y_{}_{}".format(seq_len, step)]))]
         )
     for idx in test_idx:
         X_test.extend(docs_map[idx]["X_{}_{}".format(seq_len, step)])
         y_test.extend(docs_map[idx]["y_{}_{}".format(seq_len, step)])
         groups_test.extend(
-            [idx for i in range(len(docs_map[idx]["y_{}_{}".format(seq_len, step)]))]
+            [idx for i in range(
+                len(docs_map[idx]["y_{}_{}".format(seq_len, step)]))]
         )
     return X_train, y_train, X_test, y_test, test_idx, groups_train, groups_test
 
 
-
-def get_X_y_by_doc_indices(docs_map,doc_indices,seq_len,step):
+def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
     X = []
     y = []
     groups = []
-    if isinstance(docs_map,dict):
+    if isinstance(docs_map, dict):
         for idx in doc_indices:
             X.extend(docs_map[str(idx)]["X_{}_{}".format(seq_len, step)])
             y.extend(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)])
             groups.extend(
-                [idx for i in range(len(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)]))]
+                [idx for i in range(
+                    len(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)]))]
             )
-    elif isinstance(docs_map,pd.DataFrame):
-        X = docs_map[docs_map['doc_idx'].isin(doc_indices)].drop(['doc_idx','sent_idx','is_nar'],axis=1)
+    elif isinstance(docs_map, pd.DataFrame):
+        X = docs_map[docs_map['doc_idx'].isin(doc_indices)].drop(
+            ['doc_idx', 'sent_idx', 'is_nar'], axis=1)
         y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
         groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
-    return X,y,groups
+    return X, y, groups
 
-def get_y_by_doc_indices(docs_map,doc_indices,seq_len,step):
-    y=[]
+
+def get_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
+    y = []
     for idx in doc_indices:
         y.extend(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)])
     return y
-        
+
+
 def manual_groups_validate(docs_map, test_percent, seq_len, step, num_splits=10):
     score_list = []
     for i in range(num_splits):
@@ -196,7 +210,8 @@ def manual_groups_validate(docs_map, test_percent, seq_len, step, num_splits=10)
             groups_train,
             groups_test,
         ) = split_test_train_docs(docs_map, test_percent, seq_len, step)
-        score_list.append(manual_get_prediction(X_train, y_train, X_test, y_test))
+        score_list.append(manual_get_prediction(
+            X_train, y_train, X_test, y_test))
     return np.array(score_list)
 
 
@@ -212,7 +227,8 @@ def manual_get_prediction(X_train, y_train, X_test, y_test):
     crf.fit(X_train, y_train)
     y_pred = crf.predict(X_test)
     labels = list(crf.classes_)
-    f1 = metrics.flat_f1_score(y_test, y_pred, average="weighted", labels=labels)
+    f1 = metrics.flat_f1_score(
+        y_test, y_pred, average="weighted", labels=labels)
     recall = metrics.flat_recall_score(
         y_test, y_pred, average="weighted", labels=labels
     )
@@ -261,7 +277,8 @@ def print_error_par_text(dir_name, indices, pred_info_df, print_proba):
         selected_par_indices = selected_df.query("doc_idx == @doc_idx")[
             "par_idx_in_doc"
         ].unique()
-        doc_corpus = get_labeled_doc_corpus(doc_idx, selected_par_indices, pred_info_df)
+        doc_corpus = get_labeled_doc_corpus(
+            doc_idx, selected_par_indices, pred_info_df)
         # print(
         #     "==========\n{} doc: {} paragraph with error".format(
         #         doc_idx, len(selected_par_indices)
@@ -274,7 +291,8 @@ def print_error_par_text(dir_name, indices, pred_info_df, print_proba):
             par_columns = print_labeled_paragraph_by_columns(
                 doc_idx, par_key, par_corpus, print_proba
             )
-            colored_df = pd.concat([colored_df, par_columns], ignore_index=True)
+            colored_df = pd.concat(
+                [colored_df, par_columns], ignore_index=True)
     colored_df["doc_idx"] = colored_df["doc_idx"].astype(int)
     colored_df["par_idx"] = colored_df["par_idx"].astype(int)
     html = colored_df.to_html(escape=False, justify="center")
@@ -335,10 +353,12 @@ def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba
         else:
             conf_score = ""
         corr_par += (
-            "".join([conf_score, corr_style[par_corpus["label"][i]], sent, end]) + ". "
+            "".join(
+                [conf_score, corr_style[par_corpus["label"][i]], sent, end]) + ". "
         )
         pred_par += (
-            "".join([conf_score, pred_style[par_corpus["pred"][i]], sent, end]) + ". "
+            "".join(
+                [conf_score, pred_style[par_corpus["pred"][i]], sent, end]) + ". "
         )
     par_columns.loc[0, "doc_idx"] = int(doc_idx)
     par_columns.loc[0, "par_idx"] = int(par_idx)
@@ -352,7 +372,7 @@ class ByDocFold:
     def __init__(self, n_splits=3):
         self.n_splits = n_splits
 
-    def split(self, X, y, groups=None):
+    def split(self, X, y=None, groups=None):
         doc_indices = set(groups)
         doc_count = len(doc_indices)
         test_count = int(defines.TEST_PERSENT * doc_count)
@@ -362,6 +382,23 @@ class ByDocFold:
             train_idx = [i for i, j in enumerate(groups) if j in train_docs]
             test_idx = [i for i, j in enumerate(groups) if j in test_docs]
             yield train_idx, test_idx
+
+    def get_n_splits(self, X, y, groups=None):
+        return self.n_splits
+
+
+class DocsMapFold:
+    def __init__(self, n_splits=3):
+        self.n_splits = n_splits
+
+    def split(self, X, y=None, groups=None):
+        doc_indices = set(X.keys())
+        doc_count = len(doc_indices)
+        test_count = int(defines.TEST_PERSENT * doc_count)
+        for i in range(self.n_splits):
+            test_docs = set(random.sample(doc_indices, test_count))
+            train_docs = doc_indices - test_docs
+            yield train_docs, test_docs
 
     def get_n_splits(self, X, y, groups=None):
         return self.n_splits
@@ -402,65 +439,116 @@ def get_features_df(dir_name, features, is_dic=False):
     del tf_features
     return features_df
 
-class CrfTransformer(BaseEstimator, TransformerMixin):
 
-  def __init__(self,seq_len=3,step=3):#,dir_name):
-    self.seq_len = seq_len
-    self.step = step
-    # self.dir_name=dir_name
-    # json_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,self.dir_name,"docs_map.json")
-    # with open(json_path, 'r') as fp:
-    #     self.docs_map = json.load(fp)
-    print('\n>>>>>>>init() called.\n')
+class CrfTransformer(TransformerMixin, BaseEstimator):
 
+    def __init__(self, seq_len=3, step=3, param=None):  # ,dir_name):
+        self.seq_len = seq_len
+        self.step = step
+        self.param = param
 
-  def fit(self, X, indices = None):
-    print('\n>>>>>>>fit() called.\n')
+        # self.dir_name=dir_name
+        # json_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,self.dir_name,"docs_map.json")
+        # with open(json_path, 'r') as fp:
+        #     self.docs_map = json.load(fp)
+        print('\n>>>>>>>init() called.\n')
+
     
-    return self
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+    
+    def fit_transform(self, X, y=None, **fit_params):
+        return self.fit(X=X).transform(X=X, **fit_params)
 
-  def transform(self, X, indices = None):
-    print('\n>>>>>>>transform() called.\n')
-    X_=[]
-    y_ =[]
-    for doc in indices:
-        X_.extend(X[doc]["X_{}_{}".format(self.seq_len, self.step)])
-        y_.extend(X[doc]["y_{}_{}".format(self.seq_len, self.step)])
-    return X_, y_
+    def fit(self, X, y=None, **fit_params):
+        return self
+    
+   
+
+    def transform(self, X, y=None, **fit_params):
+        print('\n>>>>>>>transform() called.\n')
+        X_l = []
+        indices=X.keys()
+        for doc in indices:
+            X_l.extend(X[doc]["X_{}_{}".format(self.seq_len, self.step)])
+        return X_l
+
+
+class CrfClassifier(ClassifierMixin, BaseEstimator):
+
+    def __init__(self, crf_model=None):
+        print('\n>>>>>>>init() called.\n')
+        self._estimator_type = "classifier"
+        self.crf_model = crf_model
+
+    def fit(self, X, y):
+        self.classes_ = np.unique(flatten(y))
+        self.crf_model.fit(X=X, y=y)
+        self.is_fitted_ = True
+        return self
+
+    def predict(self, X):
+        check_is_fitted(self, 'is_fitted_')
+        return flatten(self.crf_model.predict(X))
+
+    def predict_proba(self, X):
+        check_is_fitted(self, 'is_fitted_')
+        proba_dict = flatten(self.crf_model.predict_marginals(X))
+        return get_predicted_prob_from_dict(proba_dict)
+
+    def score(self, X, y, sample_weight=None):
+        return common_utils.get_score(y, self.predict(X), labels=self.classes_)
+
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+    
+    def fit_transform(self, X, y=None):
+        return self.fit(X=X,y=y)
 
 
 
-
-def add_sent_to_docs_map(dir_name,docs_map):
+def add_sent_to_docs_map(dir_name, docs_map):
     for key in docs_map.keys():
-        sent_db_path = os.path.join(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_db.csv".format(int(key))))
-        sent_db = pd.read_csv(sent_db_path,usecols=['text','is_nar'])
-        docs_map[key]['text'] = sent_db['text'].tolist()
-    
+        sent_db_path = os.path.join(os.path.join(
+            os.getcwd(), defines.PATH_TO_DFS, dir_name, "{:02d}_sent_db.csv".format(int(key))))
+        sent_db = pd.read_csv(sent_db_path, usecols=['text', 'is_nar'])
+        docs_map[key]['X_bert'] = sent_db['text'].tolist()
+        docs_map[key]['y_bert'] = sent_db['is_nar'].tolist()
 
 
+# def my_fit_and_score(
+#     estimator_pipe,
+#     docs_map,
+#     scorer,
+#     train_idx,
+#     test_idx,
+#     parameters,
+#     return_train_score)
+
+#     result = {}
+
+#    if parameters is not None:
+#         # clone after setting parameters in case any parameters
+#         # are estimators (like pipeline steps)
+#         # because pipeline doesn't clone steps in fit
+#         cloned_parameters = {}
+#         for k, v in parameters.items():
+#             cloned_parameters[k] = clone(v, safe=False)
+
+#     estimator_pipe = estimator_pipe.set_params(**cloned_parameters)
+#     estimator_pipe.fit(docs_map, train_idx)
+#     test_scores = estimator_pipe.score(docs_map, test_idx)
+#     result["test_scores"] = test_scores
+#     return result
 
 
-def get_crf_pipe(crfTrandform,crfClf):
-    crf_pipe= Pipeline(steps=[('preprocessor', crfTrandform()), ('classifier', crfClf)])
-    return crf_pipe
+def select_docs_from_map(docs_map, inidces):
+    return {key: docs_map[key] for key in inidces}
 
-def get_bert_pipe(bertTrandform,bertClf):
-    bert_pipe= Pipeline(steps=[('preprocessor', bertTrandform()), ('classifier', bertClf)])
-    return bert_pipe
-
-def my_fit_and_score(
-    estimator_pipe,
-    docs_map,
-    scorer,
-    train_idx,
-    test_idx):
-    
-    result = {}
-    estimator_pipe.fit(docs_map,train_idx)
-    test_scores = estimator_pipe.score(docs_map,test_idx)
-    result["test_scores"] = test_scores
-    return results
 
 def manual_cross_validate(
     estimator,
@@ -476,11 +564,10 @@ def manual_cross_validate(
     error_score=np.nan,
 ):
 
-
-
     # We clone the estimator to make sure that all the folds are
     # independent, and that it is pickle-able.
-    parallel = Parallel(n_jobs=n_jobs, verbose=verbose, pre_dispatch=pre_dispatch)
+    parallel = Parallel(n_jobs=n_jobs, verbose=verbose,
+                        pre_dispatch=pre_dispatch)
     results = parallel(
         delayed(my_fit_and_score)(
             clone(estimator),
@@ -489,7 +576,7 @@ def manual_cross_validate(
             train,
             test
         )
-        for train, test in cv.split(X, y, groups)
+        for train, test in cv.split(docs_map)
     )
 
     results = _validation._aggregate_score_dicts(results)
@@ -501,9 +588,11 @@ def manual_cross_validate(
     if return_estimator:
         ret["estimator"] = results["estimator"]
 
-    test_scores_dict = _validation._normalize_score_results(results["test_scores"])
+    test_scores_dict = _validation._normalize_score_results(
+        results["test_scores"])
     if return_train_score:
-        train_scores_dict = _validation._normalize_score_results(results["train_scores"])
+        train_scores_dict = _validation._normalize_score_results(
+            results["train_scores"])
 
     for name in test_scores_dict:
         ret["test_%s" % name] = test_scores_dict[name]

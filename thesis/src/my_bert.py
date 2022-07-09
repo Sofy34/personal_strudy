@@ -12,9 +12,16 @@ import transformers
 from transformers import AutoModel, BertTokenizerFast
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from transformers import AdamW
-from sklearn.utils.class_weight import compute_class_weight
 import sys
 sys.path.append('./src/')
+
+import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.utils.multiclass import unique_labels
+from sklearn.metrics import euclidean_distances
+import common_utils
+from sklearn_crfsuite.utils import flatten
 
 # specify GPU
 # device = torch.device("cuda")
@@ -60,8 +67,10 @@ def split_train_val_test_per_doc(df):
 
 
 def get_test_tokens(my_tokenizer, test_text, my_max_len=30):
+    if not isinstance(test_text,list):
+        test_text = test_text.tolist()
     tokens_test = my_tokenizer.batch_encode_plus(
-        test_text.tolist(),
+        test_text,
         max_length=my_max_len,
         pad_to_max_length=True,
         truncation=True
@@ -122,12 +131,16 @@ def covert_token2tensor(tokens_train, train_labels, tokens_val, val_labels, toke
     return tensor_map
 
 
-def covert_token2tensor(tokens_test, test_labels):
+def convert_single_token2tensor(tokens_test):
     tensor_map = {}
     tensor_map['seq'] = torch.tensor(tokens_test['input_ids'])
     tensor_map['mask'] = torch.tensor(tokens_test['attention_mask'])
-    tensor_map['y'] = torch.tensor(test_labels.tolist(), dtype=torch.long)
     return tensor_map
+
+def convert_y_tokens2tensor(test_labels):
+    if not isinstance(test_labels,list):
+        test_labels=test_labels.tolist()
+    return torch.tensor(test_labels, dtype=torch.long)
 
 # freeze all the parameters
 
@@ -138,14 +151,14 @@ def freeze_model_params(pretrained):
     return pretrained
 
 
-def get_single_loader(tensor_map, name="test", batch_size=32):  # define a batch size
+def get_single_loader(tensor_map, batch_size=32):  # define a batch size
 
     # wrap tensors
     data = TensorDataset(
-        tensor_map[name]['seq'], tensor_map[name]['mask'], tensor_map[name]['y'])
+        tensor_map['seq'], tensor_map['mask'], tensor_map['y'])
 
     # sampler for sampling the data during training
-    sampler = RandomSampler(data)
+    sampler = SequentialSampler(data)
 
     # dataLoader for train set
     dataloader = DataLoader(data, sampler=sampler, batch_size=batch_size)
@@ -238,8 +251,7 @@ def get_optimizer(wrapped_model):
 
 
 def get_cross_entropy(train_labels):
-    class_weights = compute_class_weight(
-        class_weight='balanced', classes=np.unique(train_labels), y=train_labels)
+    class_weights = common_utils.get_class_weights(train_labels)
     print("Class Weights:", class_weights)
     # converting list of class weights to a tensor
     weights = torch.tensor(class_weights, dtype=torch.float)
@@ -424,73 +436,93 @@ def get_prediction(model, test_map):
     return preds_label, preds_proba
 
 
-class BertTransformer(BaseEstimator, TransformerMixin):
+class BertTransformer(TransformerMixin, BaseEstimator):
 
-    def __init__(self, tokenizer=None):
+    def __init__(self, tokenizer=None,param=None):
         self.tokenizer = tokenizer
         print('\n>>>>>>>init() called.\n')
+        self.param = param
 
+    
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+    
     def fit(self, X, indices=None):
         print('\n>>>>>>>fit() called.\n')
 
         return self
+    
+  
+    def fit_transform(self, X, y=None, **fit_params):
+        return self.fit(X, **fit_params).transform(X=X)
 
-    def transform(self, X, train_indices=None, test_indices=None):
+    def transform(self, X, y=None):
         print('\n>>>>>>>transform() called.\n')
-        X_ = []
-        y_ = []
-        val_percent = 0.2
-        traind_idx, val_idx = (indices, val_percent, random_state=42):
+        X_= []
+        indices=X.keys()
         X_tensor_map = {}
-        for doc in traind_idx:
-            X_train.extend(X[doc]["X_text"])
-            y_train.extend(X[doc]["y_traintext"])
-            y_train = convert_str_label_to_binary(y_train)
-            X_train_tokens = get_test_tokens(self.tokenizer, X_train)
-            X_tensor_map['train'] = covert_token2tensor(
-                X_train_tokens, y_train)
-            X_tensor_map['train']['y_list'] = y_train
-        for doc in val_idx:
-            X_val.extend(X[doc]["X_text"])
-            y_val.extend(X[doc]["y_text"])
-            y_val = convert_str_label_to_binary(y_val)
-            X_val_tokens = get_test_tokens(self.tokenizer, X_val)
-            X_tensor_map['val'] = covert_token2tensor(X_val_tokens, y_val)
-        for doc in test_indices:
-            X_test.extend(X[doc]["X_text"])
-            y_test.extend(X[doc]["y_text"])
-            y_test = convert_str_label_to_binary(y_test)
-            X_test_tokens = get_test_tokens(self.tokenizer, X_test)
-            X_tensor_map['test'] = covert_token2tensor(X_test_tokens, y_test)
+        for doc in indices:
+            X_.extend(X[doc]["X_bert"])
+        X_tokens = get_test_tokens(self.tokenizer, X_)
+        X_tensor_map = convert_single_token2tensor(
+            X_tokens)
+
         return X_tensor_map
 
-        def convert_str_label_to_binary(y):
-            return [0 if i == 'not_nar' else 1 for i in y]
 
 
-class BertClassifier():
+class BertClassifier(ClassifierMixin, BaseEstimator):
 
     def __init__(self, pretrained_model=None):
+        print('\n>>>>>>>init() called.\n')
+        self._estimator_type = "classifier"
         self.pretrained_model = pretrained_model
         self.wrapped_model = wrap_pretained_model(self.pretrained_model)
         self.optimizer = get_optimizer(self.wrapped_model)
-        self.model_name = self.pretrained_model.__class__.name)
+
+    def fit(self, X, y=None,batch_size=1024):
+        print('>>>>>>> fit() called')
+        y_= common_utils.convert_str_label_to_binary(flatten(y))
+        X['y']=convert_y_tokens2tensor(y_)
+        self.dataloader = get_single_loader(X,batch_size)
+        self.cross_entropy = get_cross_entropy(np.asarray(y_))
+        self.classes_ = np.unique(y)
+        train(self.wrapped_model,
+            self.optimizer,
+            self.dataloader,
+            self.cross_entropy)
+        self.is_fitted_ = True
+        return self
+    
+    def fit_transform(self, X, y=None):
+        return self.fit(X=X,y=y)
+    
+    
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+ 
+    def predict(self, X):
+        check_is_fitted(self, 'is_fitted_')
+        preds = self.wrapped_model(X['seq'], X['mask'])
+        preds_np=preds.detach().cpu().numpy()
+        preds_label=np.argmax(preds_np, axis=1)
+        return common_utils.convert_binary_label_to_str(preds_label)
 
 
-        print('\n>>>>>>>init() called.\n')
-
-    def fit(self, X, y = None):
-        self.train_dataloader=get_single_loader(X, "train")
-        self.val_dataloader=get_single_loader(X, "val")
-        self.cross_entropy=get_cross_entropy(X['train']['y_list'])
-        self.best_dics=train_validate(self.model_name,
-                       self.wrapped_model,
-                       self.optimizer,
-                       self.train_dataloader,
-                       self.val_dataloader,
-                       self.cross_entropy)
-
-    def score(self, X, y = None):
-        self.best_model=self.wrapped_model.load_state_dict(self.best_dics)
-        self.best_model.eval()
-        get_prediction(self.best_model, X['test'])
+    def predict_proba(self, X):
+        check_is_fitted(self, 'is_fitted_')
+        preds=self.wrapped_model(X['seq'], X['mask'])
+        preds_proba=F.softmax(preds, dim=-1).detach().cpu().numpy()
+        return preds_proba
+    
+    def score(self, X, y, sample_weight=None):
+        return common_utils.get_score(y, self.predict(X), labels=self.classes_)
+    
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self

@@ -20,6 +20,16 @@ from sklearn.utils.multiclass import unique_labels
 from sklearn.metrics import euclidean_distances
 from joblib import Parallel, logger
 from sklearn.utils.fixes import delayed
+from sklearn.ensemble import VotingClassifier,StackingClassifier
+from sklearn.ensemble._stacking import _BaseStacking
+from sklearn.ensemble._base import _fit_single_estimator
+from sklearn.base import clone
+from sklearn.utils import Bunch
+from sklearn.preprocessing._label import LabelEncoder
+import sys
+sys.path.append('./src/')
+import common_utils
+
 global error_compare_file
 global tf_features
 
@@ -499,7 +509,7 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
         return get_predicted_prob_from_dict(proba_dict)
 
     def score(self, X, y, sample_weight=None):
-        return common_utils.get_score(y, self.predict(X), labels=self.classes_)
+        return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
 
     def set_params(self, **parameters):
         for parameter, value in parameters.items():
@@ -601,3 +611,72 @@ def manual_cross_validate(
             ret[key] = train_scores_dict[name]
 
     return ret
+
+class MyVotingClassifier(VotingClassifier):
+    
+    def __init__(
+        self,
+        estimators,
+        *,
+        voting="hard",
+        weights=None,
+        n_jobs=None,
+        flatten_transform=True,
+        verbose=False,
+    ):
+        super().__init__(estimators=estimators)
+        self.voting = voting
+        self.weights = weights
+        self.n_jobs = n_jobs
+        self.flatten_transform = flatten_transform
+        self.verbose = verbose
+        
+    def fit(self, X, y, sample_weight=None):
+        self.classes_ = np.unique(flatten(y)).sort()
+        self.le_ = LabelEncoder().fit(flatten(y))
+        names, clfs = self._validate_estimators()
+
+        self.estimators_ = Parallel(n_jobs=self.n_jobs)(
+            delayed(_fit_single_estimator)(
+                clone(clf),
+                X,
+                y,
+                sample_weight=sample_weight,
+                message_clsname="Voting",
+                message=self._log_message(names[idx], idx + 1, len(clfs)),
+            )
+            for idx, clf in enumerate(clfs)
+            if clf != "drop"
+        )
+
+        self.named_estimators_ = Bunch()
+
+        # Uses 'drop' as placeholder for dropped estimators
+        est_iter = iter(self.estimators_)
+        for name, est in self.estimators:
+            current_est = est if est == "drop" else next(est_iter)
+            self.named_estimators_[name] = current_est
+
+            if hasattr(current_est, "feature_names_in_"):
+                self.feature_names_in_ = current_est.feature_names_in_
+
+        return self
+    
+    def score(self, X, y, sample_weight=None):
+        return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
+    
+    def predict(self, X):
+        check_is_fitted(self)
+        if self.voting == "soft":
+            maj = np.argmax(self.predict_proba(X), axis=1)
+
+        else:  # 'hard' voting
+            predictions = self._predict(X)
+            maj = np.apply_along_axis(
+                lambda x: np.argmax(np.bincount(x, weights=self._weights_not_none)),
+                axis=1,
+                arr=predictions,
+            )
+        # maj = common_utils.convert_binary_label_to_str(maj)
+        maj = self.le_.inverse_transform(maj)
+        return maj

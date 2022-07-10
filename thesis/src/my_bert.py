@@ -520,7 +520,7 @@ class BertClassifier(ClassifierMixin, BaseEstimator):
         return preds_proba
     
     def score(self, X, y, sample_weight=None):
-        return common_utils.get_score(y, self.predict(X), labels=self.classes_)
+        return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
     
     def set_params(self, **parameters):
         for parameter, value in parameters.items():

@@ -160,7 +160,7 @@ def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyze
 
 def get_and_save_sent_lemma_db(dir_name,doc_idx):
     doc_name = os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_pos_db.csv".format(doc_idx))
-    if not os.path.isfile(doc_name) or not os.path.islink(doc_name):
+    if not (os.path.isfile(doc_name) or os.path.islink(doc_name)):
         print("ERROR: {} does not exists".format(doc_name))
         return
     sent_pos_db = pd.read_csv(doc_name,usecols=['sent_idx','LEMMA'])
@@ -541,7 +541,8 @@ def sent2features_orig(sent_idx,idx_in_seq,seq_len=6,neighbor_radius =2):
 
 def save_feature_value(value,name):
     save = 0
-    if value !=0 or any(substr in name for substr in ['idx','is','pos_in']):
+    # if value !=0 or any(substr in name for substr in ['idx','is','pos_in']):
+    if not 'idx' in name and (value !=0 or any(substr in name for substr in ['is','pos_in'])):
         save = 1
     else:
         save = 0

@@ -15,7 +15,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import _validation
 
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted,_num_samples
 from sklearn.utils.multiclass import unique_labels
 from sklearn.metrics import euclidean_distances
 from joblib import Parallel, logger
@@ -26,6 +26,7 @@ from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.base import clone
 from sklearn.utils import Bunch
 from sklearn.preprocessing._label import LabelEncoder
+from sklearn.utils import indexable
 import sys
 sys.path.append('./src/')
 import common_utils
@@ -188,11 +189,11 @@ def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
     groups = []
     if isinstance(docs_map, dict):
         for idx in doc_indices:
-            X.extend(docs_map[str(idx)]["X_{}_{}".format(seq_len, step)])
-            y.extend(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)])
+            X.extend(docs_map[idx]["X_{}_{}".format(seq_len, step)])
+            y.extend(docs_map[idx]["y_{}_{}".format(seq_len, step)])
             groups.extend(
                 [idx for i in range(
-                    len(docs_map[str(idx)]["y_{}_{}".format(seq_len, step)]))]
+                    len(docs_map[idx]["y_{}_{}".format(seq_len, step)]))]
             )
     elif isinstance(docs_map, pd.DataFrame):
         X = docs_map[docs_map['doc_idx'].isin(doc_indices)].drop(
@@ -407,6 +408,28 @@ class ByDocFold():
     #             test_index = indices[test_index]
     #             yield train_index, test_index
 
+class MyLeavePGroupsOut(LeavePGroupsOut):
+    
+    def __init__(self, n_groups, n_splits):
+        self.n_groups = n_groups
+        self.n_splits=n_splits
+
+    def split(self, X, y=None, groups=None):
+        X, y, groups = indexable(X, y, groups)
+        indices = np.arange(_num_samples(X))
+        iter=0
+        for test_index in super()._iter_test_masks(X, y, groups):
+            if iter >= self.n_splits:
+                break
+            train_index = indices[np.logical_not(test_index)]
+            test_index = indices[test_index]
+            iter+=1
+            yield train_index, test_index
+            
+    def get_n_splits(self, X=None, y=None, groups=None):
+        return self.n_splits
+
+            
 class DocsMapFold():
     def __init__(self, n_splits=3):
         self.n_splits = n_splits
@@ -438,10 +461,10 @@ def get_tf_string(attr):
     return string
 
 
-def get_features_df(dir_name, features, is_dic=False):
+def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=False):
     global tf_features
     json_path = os.path.join(
-        os.getcwd(), defines.PATH_TO_DFS, dir_name, "tf_features_map.json"
+        os.getcwd(), defines.PATH_TO_DFS, dir_name, tf_name
     )
     with open(json_path, "r") as fp:
         tf_features = json.load(fp)
@@ -556,6 +579,9 @@ def my_fit_and_score(estimator_pipe,docs_map,scorer,train_idx,test_idx,parameter
     result["test_scores"] = test_scores
     print("Current CV score {}".format(test_scores))
     return result
+
+
+
 
 
 def select_docs_from_map(docs_map, inidces):

@@ -30,7 +30,7 @@ def concat_dbs_by_idx(dir_name,db_name,indices,cols=[],index_name=""):
     db.rename(columns={'level_0':'doc_idx','level_1':new_idx_name},inplace=True)
     return db
 
-def concat_dbs(dir_name,db_name,cols=[]):
+def concat_dbs(dir_name,db_name,cols=[],index_name=""):
     df_list =  glob.glob(os.path.join(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"*_{}.csv".format(db_name))))
     df_list.sort()
     df_map = {}
@@ -41,7 +41,8 @@ def concat_dbs(dir_name,db_name,cols=[]):
     else:
         db = pd.concat([pd.read_csv(i) for i in df_map.values()],keys=df_map.keys())
     db.reset_index(inplace=True)
-    db.rename(columns={'level_0':'doc_idx','level_1':"{}_idx".format(db_name.split('_')[0])},inplace=True)
+    new_idx_name = index_name if len(index_name)>0 else "{}_idx".format(db_name.split('_')[0])
+    db.rename(columns={'level_0':'doc_idx','level_1':new_idx_name},inplace=True)
     return db
 
 def convert_to_list(_dic):

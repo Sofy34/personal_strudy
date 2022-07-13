@@ -37,6 +37,7 @@ SENT_FEATURES = [
     "is_question",
     "sent_pos_in_par",
     "sent_pos_in_doc",
+    "par_pos_in_doc"
 ]
 SAMPLE_FEATURES = [
     "sent_len",

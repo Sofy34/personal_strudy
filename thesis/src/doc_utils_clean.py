@@ -107,7 +107,7 @@ def handle_short_sent_in_block(block):
     return handled_block
 
 
-def replace_char_at_index(org_str, index, replacement=""):
+def replace_char_at_index(org_str, index, replacement=" "):
     """Replace character at index in string org_str with the
     given replacement character."""
     new_str = org_str
@@ -123,7 +123,8 @@ def find_dot_idx(text, start):
 def count_words(text):
     return len(text.split())
 
-
+def remove_multi_x(text):
+    return re.sub(r'X{3,4}.*?X{1,4}|X{3,}',' XXX ',text)
 
 
 def split_block_to_sentences(text, merge_short):
@@ -131,6 +132,7 @@ def split_block_to_sentences(text, merge_short):
     # important to remove before we split into sentences
     text = replace_brackets(text)
     text = remove_multi_dots(text)
+    text = remove_multi_x(text)
     text = remove_symbols(text)
     if merge_short:
         text = handle_short_sent_in_block(text)
@@ -173,13 +175,13 @@ def add_sentences_of_blocks_to_db(block_db_idx,merge_short_sent):
         curr_db_idx = sent_db.shape[0]
         sent_db.loc[curr_db_idx, "is_question"] = 1 if "?" in sentence else 0
         sent_db.loc[curr_db_idx,'text'] = re.sub(r'\?','',sentence)
-        sent_db.loc[curr_db_idx, "text"] = sentence
         sent_db.loc[curr_db_idx, "sent_idx_in_block"] = i
         sent_db.loc[curr_db_idx, "block_idx"] = block_db_idx
         sent_db.loc[curr_db_idx, "is_nar"] = block_line["is_nar"]
         sent_db.loc[curr_db_idx, "doc_idx"] = block_line["doc_idx"]
         sent_db.loc[curr_db_idx, "par_db_idx"] = block_line["par_db_idx"]
         sent_db.loc[curr_db_idx, "par_idx_in_doc"] = block_line["par_idx_in_doc"]
+        sent_db.loc[curr_db_idx, "par_pos_in_doc"] = block_line["par_pos_in_doc"]
         sent_db.loc[curr_db_idx, "par_type"] = block_line["par_type"]
         sent_db.loc[curr_db_idx, "block_type"] = block_line["block_type"]
         sent_db.loc[curr_db_idx, "nar_idx"] = block_line["nar_idx"]
@@ -305,6 +307,7 @@ def add_blocks_of_par_to_db(par_db_idx):
         block_db.loc[curr_db_idx, "is_nar"] = is_nar
         block_db.loc[curr_db_idx, "doc_idx"] = par_db_line["doc_idx"]
         block_db.loc[curr_db_idx, "par_idx_in_doc"] = par_db_line["par_idx_in_doc"]
+        block_db.loc[curr_db_idx, "par_pos_in_doc"] = par_db_line["par_pos_in_doc"]
         block_db.loc[curr_db_idx, "par_db_idx"] = par_db_idx
         block_db.loc[curr_db_idx, "par_type"] = par_db_line["par_type"]
         block_db.loc[curr_db_idx, "block_type"] = tupple[0]
@@ -394,7 +397,7 @@ def save_doc_sentences(dir_name,doc_idx_from_name,merge_short_sent):
         "nar_sent_count",
         len(sent_db[sent_db["is_nar"] == 1].index),
     )
-    print("{} Doc {} sentences saved".format(doc_idx_from_name, len(sent_db.index)))
+    print("{} sentences".format(len(sent_db.index)), end = ' ')
     del sent_db
 
 
@@ -431,6 +434,7 @@ def save_doc_paragraphs(dir_name,doc_idx_from_name):
         # if [...# ] or [ ...&...#]
         if par.text.rfind(defines.END_CHAR) > par.text.rfind(defines.START_CHAR):
             inside_narrative = 0
+    par_db["par_pos_in_doc"] = (par_db.index.values+1)/len(par_db.index)
     par_db.to_csv(
         os.path.join(
             os.getcwd(),
@@ -552,7 +556,7 @@ def parse_all_docs(dir_name,merge_short_sent,doc_path_list=None):
     doc_indices.sort()
     for i, doc_idx in enumerate(doc_indices):
         parse_doc(dir_name,int(doc_idx),merge_short_sent)
-        print("Finished doc {} of {}".format(i, len(doc_db.index)))
+        print("{}".format(i),end=' ')
     doc_db.to_csv(
         os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv"), index=False
     )

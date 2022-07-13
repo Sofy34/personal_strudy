@@ -464,9 +464,9 @@ def get_dbIdx_by_docIdx(doc_idx):
     return doc_db[doc_db["doc_idx_from_name"] == doc_idx].index.values
 
 
-def save_docs_db(doc_path_list=None):
+def save_docs_db(doc_path_list=None,dir_name=""):
     global doc_db
-    doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
+    doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, "doc_db.csv")
     if os.path.isfile(doc_db_path):
         os.remove(doc_db_path)
     print("Creating doc_db")
@@ -566,7 +566,7 @@ def parse_all_docs(dir_name,merge_short_sent,doc_path_list=None):
 def parse_doc(dir_name,doc_idx, merge_short_sent, single=False):
     global doc_db, debug_db
     if single:
-        doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
+        doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, "doc_db.csv")
         doc_db = pd.read_csv(doc_db_path)
         debug_db = pd.DataFrame()
     save_doc_paragraphs(dir_name,doc_idx)
@@ -574,10 +574,10 @@ def parse_doc(dir_name,doc_idx, merge_short_sent, single=False):
     save_doc_sentences(dir_name,doc_idx,merge_short_sent)
     if single:
         debug_db.to_csv(
-            os.path.join(os.getcwd(), defines.PATH_TO_DFS, "debug_db.csv"), index=False
+            os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, "debug_db.csv"), index=False
         )
         doc_db.to_csv(
-            os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv"), index=False
+            os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,"doc_db.csv"), index=False
         )
 
 

@@ -29,7 +29,8 @@ from sklearn.preprocessing._label import LabelEncoder
 import sys
 sys.path.append('./src/')
 import common_utils
-
+import time
+from sklearn.model_selection import LeavePGroupsOut
 global error_compare_file
 global tf_features
 
@@ -378,7 +379,7 @@ def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba
     return par_columns
 
 
-class ByDocFold:
+class ByDocFold():
     def __init__(self, n_splits=3):
         self.n_splits = n_splits
 
@@ -396,8 +397,17 @@ class ByDocFold:
     def get_n_splits(self, X, y, groups=None):
         return self.n_splits
 
+    # def split(self, X, y=None, groups=None):
+    #     X, y, groups = indexable(X, y, groups)
+    #     indices = np.arange(_num_samples(X))
+    #     split_idx=0
+    #     for test_index in self._iter_test_masks(X, y, groups):
+    #         if split_idx < self.n_splits:
+    #             train_index = indices[np.logical_not(test_index)]
+    #             test_index = indices[test_index]
+    #             yield train_index, test_index
 
-class DocsMapFold:
+class DocsMapFold():
     def __init__(self, n_splits=3):
         self.n_splits = n_splits
 
@@ -452,16 +462,12 @@ def get_features_df(dir_name, features, is_dic=False):
 
 class CrfTransformer(TransformerMixin, BaseEstimator):
 
-    def __init__(self, seq_len=3, step=3, param=None):  # ,dir_name):
+    def __init__(self, seq_len=3, step=3, param=None):  
+        print('{}>>>>>>>init() called'.format(self.__class__.__name__))
         self.seq_len = seq_len
         self.step = step
         self.param = param
 
-        # self.dir_name=dir_name
-        # json_path = os.path.join(os.getcwd(),defines.PATH_TO_DFS,self.dir_name,"docs_map.json")
-        # with open(json_path, 'r') as fp:
-        #     self.docs_map = json.load(fp)
-        print('\n>>>>>>>init() called.\n')
 
     
     def set_params(self, **parameters):
@@ -475,10 +481,9 @@ class CrfTransformer(TransformerMixin, BaseEstimator):
     def fit(self, X, y=None, **fit_params):
         return self
     
-   
 
     def transform(self, X, y=None, **fit_params):
-        print('\n>>>>>>>transform() called.\n')
+        print('{}>>>>>>>transform() called'.format(self.__class__.__name__))
         X_l = []
         indices=X.keys()
         for doc in indices:
@@ -489,7 +494,7 @@ class CrfTransformer(TransformerMixin, BaseEstimator):
 class CrfClassifier(ClassifierMixin, BaseEstimator):
 
     def __init__(self, crf_model=None):
-        print('\n>>>>>>>init() called.\n')
+        print('{}>>>>>>init() called'.format(self.__class__.__name__))
         self._estimator_type = "classifier"
         self.crf_model = crf_model
 
@@ -500,6 +505,7 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
         return self
 
     def predict(self, X):
+        print('{}>>>>>>>predict() called'.format(self.__class__.__name__))
         check_is_fitted(self, 'is_fitted_')
         return flatten(self.crf_model.predict(X))
 
@@ -509,6 +515,7 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
         return get_predicted_prob_from_dict(proba_dict)
 
     def score(self, X, y, sample_weight=None):
+        print('{}>>>>>>> score() called'.format(self.__class__.__name__))
         return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
 
     def set_params(self, **parameters):
@@ -521,46 +528,41 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
 
 
 
-def add_sent_to_docs_map(dir_name, docs_map):
-    for key in docs_map.keys():
-        sent_db_path = os.path.join(os.path.join(
-            os.getcwd(), defines.PATH_TO_DFS, dir_name, "{:02d}_sent_db.csv".format(int(key))))
-        sent_db = pd.read_csv(sent_db_path, usecols=['text', 'is_nar'])
-        docs_map[key]['X_bert'] = sent_db['text'].tolist()
-        docs_map[key]['y_bert'] = sent_db['is_nar'].tolist()
 
 
-# def my_fit_and_score(
-#     estimator_pipe,
-#     docs_map,
-#     scorer,
-#     train_idx,
-#     test_idx,
-#     parameters,
-#     return_train_score)
+def my_fit_and_score(estimator_pipe,docs_map,scorer,train_idx,test_idx,parameters):
+    print("my_fit_and_score called {}".format(time.time()))
 
-#     result = {}
+    result = {}
+    
+    X_train,y_train = common_utils.get_x_y_by_index(docs_map,train_idx)
+    X_test,y_test = common_utils.get_x_y_by_index(docs_map,test_idx)
 
-#    if parameters is not None:
-#         # clone after setting parameters in case any parameters
-#         # are estimators (like pipeline steps)
-#         # because pipeline doesn't clone steps in fit
-#         cloned_parameters = {}
-#         for k, v in parameters.items():
-#             cloned_parameters[k] = clone(v, safe=False)
-
-#     estimator_pipe = estimator_pipe.set_params(**cloned_parameters)
-#     estimator_pipe.fit(docs_map, train_idx)
-#     test_scores = estimator_pipe.score(docs_map, test_idx)
-#     result["test_scores"] = test_scores
-#     return result
+    if parameters is not None:
+        # clone after setting parameters in case any parameters
+        # are estimators (like pipeline steps)
+        # because pipeline doesn't clone steps in fit
+        cloned_parameters = {}
+        for k, v in parameters.items():
+            cloned_parameters[k] = clone(v, safe=False)
+            estimator_pipe = estimator_pipe.set_params(**cloned_parameters)
+    start_time = time.time()
+    estimator_pipe.fit(X_train, y_train)
+    fit_time = time.time() - start_time
+    test_scores = estimator_pipe.score(X_test, y_test)
+    score_time = time.time() - start_time - fit_time
+    result["fit_time"] = fit_time
+    result["score_time"] = score_time
+    result["test_scores"] = test_scores
+    print("Current CV score {}".format(test_scores))
+    return result
 
 
 def select_docs_from_map(docs_map, inidces):
     return {key: docs_map[key] for key in inidces}
 
 
-def manual_cross_validate(
+def my_cross_validate(
     estimator,
     docs_map,
     scoring=None,
@@ -584,7 +586,8 @@ def manual_cross_validate(
             docs_map,
             scoring,
             train,
-            test
+            test,
+            fit_params
         )
         for train, test in cv.split(docs_map)
     )
@@ -595,20 +598,20 @@ def manual_cross_validate(
     ret["fit_time"] = results["fit_time"]
     ret["score_time"] = results["score_time"]
 
-    if return_estimator:
-        ret["estimator"] = results["estimator"]
+    # if return_estimator:
+    #     ret["estimator"] = results["estimator"]
 
     test_scores_dict = _validation._normalize_score_results(
         results["test_scores"])
-    if return_train_score:
-        train_scores_dict = _validation._normalize_score_results(
-            results["train_scores"])
+    # if return_train_score:
+    #     train_scores_dict = _validation._normalize_score_results(
+    #         results["train_scores"])
 
     for name in test_scores_dict:
         ret["test_%s" % name] = test_scores_dict[name]
-        if return_train_score:
-            key = "train_%s" % name
-            ret[key] = train_scores_dict[name]
+        # if return_train_score:
+        #     key = "train_%s" % name
+        #     ret[key] = train_scores_dict[name]
 
     return ret
 
@@ -630,7 +633,9 @@ class MyVotingClassifier(VotingClassifier):
         self.n_jobs = n_jobs
         self.flatten_transform = flatten_transform
         self.verbose = verbose
-        
+    
+    def get_params(self, deep=True):
+        return super()._get_params("estimators", deep=deep)
     def fit(self, X, y, sample_weight=None):
         self.classes_ = np.unique(flatten(y)).sort()
         self.le_ = LabelEncoder().fit(flatten(y))

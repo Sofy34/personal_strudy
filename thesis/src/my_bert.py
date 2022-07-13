@@ -440,7 +440,7 @@ class BertTransformer(TransformerMixin, BaseEstimator):
 
     def __init__(self, tokenizer=None,param=None):
         self.tokenizer = tokenizer
-        print('\n>>>>>>>init() called.\n')
+        print('{}>>>>>>>init() called'.format(self.__class__.__name__))
         self.param = param
 
     
@@ -450,8 +450,6 @@ class BertTransformer(TransformerMixin, BaseEstimator):
         return self
     
     def fit(self, X, indices=None):
-        print('\n>>>>>>>fit() called.\n')
-
         return self
     
   
@@ -459,7 +457,7 @@ class BertTransformer(TransformerMixin, BaseEstimator):
         return self.fit(X, **fit_params).transform(X=X)
 
     def transform(self, X, y=None):
-        print('\n>>>>>>>transform() called.\n')
+        print('{}>>>>>>>transform() called'.format(self.__class__.__name__))
         X_= []
         indices=X.keys()
         X_tensor_map = {}
@@ -475,18 +473,19 @@ class BertTransformer(TransformerMixin, BaseEstimator):
 
 class BertClassifier(ClassifierMixin, BaseEstimator):
 
-    def __init__(self, pretrained_model=None):
-        print('\n>>>>>>>init() called.\n')
+    def __init__(self, pretrained_model=None,batch_size=1024):
+        print('{}>>>>>>> init() called'.format(self.__class__.__name__))
         self._estimator_type = "classifier"
         self.pretrained_model = pretrained_model
         self.wrapped_model = wrap_pretained_model(self.pretrained_model)
         self.optimizer = get_optimizer(self.wrapped_model)
+        self.batch_size=batch_size
 
-    def fit(self, X, y=None,batch_size=1024):
-        print('>>>>>>> fit() called')
+    def fit(self, X, y=None):
+        print('{}>>>>>>> fit() called'.format(self.__class__.__name__))
         y_= common_utils.convert_str_label_to_binary(flatten(y))
         X['y']=convert_y_tokens2tensor(y_)
-        self.dataloader = get_single_loader(X,batch_size)
+        self.dataloader = get_single_loader(X,self.batch_size)
         self.cross_entropy = get_cross_entropy(np.asarray(y_))
         self.classes_ = np.unique(y)
         train(self.wrapped_model,
@@ -506,6 +505,7 @@ class BertClassifier(ClassifierMixin, BaseEstimator):
         return self
  
     def predict(self, X):
+        print('{}>>>>>>> predict() called'.format(self.__class__.__name__))
         check_is_fitted(self, 'is_fitted_')
         preds = self.wrapped_model(X['seq'], X['mask'])
         preds_np=preds.detach().cpu().numpy()
@@ -520,6 +520,7 @@ class BertClassifier(ClassifierMixin, BaseEstimator):
         return preds_proba
     
     def score(self, X, y, sample_weight=None):
+        print('{}>>>>>>> score() called'.format(self.__class__.__name__))
         return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
     
     def set_params(self, **parameters):

@@ -127,7 +127,8 @@ def remove_multi_x(text):
     return re.sub(r'X{3,4}.*?X{1,4}|X{3,}',' XXX ',text)
 
 
-def split_block_to_sentences(text, merge_short):
+def split_block_to_sentences(text_, merge_short):
+    text = text_
     text = remove_lr_annotation(text)
     # important to remove before we split into sentences
     text = replace_brackets(text)
@@ -150,10 +151,10 @@ def split_block_to_sentences(text, merge_short):
 
 
 def remove_multi_dots(text):
-    text = re.sub(r"\A\.", "", text)  # replase ".נקודה בתחילת משפט"
-    text = re.sub(r"\.+?\?", "?", text)  # replace ?.. with ?
-    # return re.sub(r'\.{2,3}', '',text) # replace .. and ... with whitespace
-    return re.sub(r"\.{2,3}", ".", text)  # replace .. and ... with .
+    text_ = re.sub(r"\A\.", "", text)  # replase ".נקודה בתחילת משפט"
+    text_ = re.sub(r"\.+?\?", "?", text_)  # replace ?.. with ?
+    # return re.sub(r'\.{2,3}', '',text_) # replace .. and ... with whitespace
+    return re.sub(r"\.{2,3}", ".", text_)  # replace .. and ... with .
 
 
 def check_text_for_symbols(text):
@@ -212,11 +213,11 @@ def split_par_to_blocks_keep_order(par_db_idx):
         block_list.insert(0, (tag, par))
     else:
         # used for keeping original order between blocks
-        splited = re.split("(&|#)", par)
-        splited_clean = splited
+        splited = re.split("&|#", par)
+        splited_clean = splited.copy()
         for i, block in enumerate(splited):
             if block_has_summary(block):  # TBD handle story summary
-                continue
+                block,summ = extract_narrative_summary(block)
             splited_clean[i] = clean_text(block)
         my_regex = {
             # [start:end]
@@ -241,7 +242,7 @@ def split_par_to_blocks_keep_order(par_db_idx):
         for i, block in enumerate(splited):
             if len(block) != 0:
                 if block_has_summary(block):
-                    continue  # TBD handle story summary
+                    block,summ = extract_narrative_summary(block)  # TBD handle story summary
                 block_idx = get_index_of_block_in_par(splited_clean, block, par_db_idx)
                 block_list.insert(block_idx, ("not_nar", block))
     check_block_list(par, splited, block_list)
@@ -510,13 +511,13 @@ def add_doc_to_db(path):
 
 
 def replace_brackets(text, replace=""):  # remove [..] , (..), [..[.]..]
-    return re.sub(r"\(.*?\)|\[.*[^\[]?\]", replace, text)
+    return re.sub(r"\([^(]*?\)|\[[^[]*?\]", replace, text)
 
 
 def clean_text(text):
-    text, _ = extract_narrative_summary(text)
-    text = remove_punctuation(text)
-    return text
+    text_, _ = extract_narrative_summary(text)
+    text_ = remove_punctuation(text_)
+    return text_
 
 
 def remove_symbols(text):
@@ -524,10 +525,11 @@ def remove_symbols(text):
 
 
 def extract_narrative_summary(text):
-    summary = re.findall("%.*?%", text)
+    text_ = text
+    summary = re.findall("%.*?%", text_)
     for i in summary:
-        text = re.sub(i, "", text)
-    return text, summary
+        text_ = re.sub(i, "", text_)
+    return text_, summary
 
 
 def remove_lr_annotation(text):

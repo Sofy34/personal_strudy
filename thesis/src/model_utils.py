@@ -250,29 +250,30 @@ def manual_get_prediction(X_train, y_train, X_test, y_test):
     return [f1, recall, precision]
 
 
-def get_labeles_par_corpus(par_idx, doc_db):
+def get_labeles_par_corpus(par_idx, doc_db, print_proba):
     par_corpus = {}
     par_db = doc_db.query("par_idx_in_doc == @par_idx")
     par_corpus["sentenses"] = par_db["text"].tolist()
     par_corpus["pred"] = par_db["pred"].tolist()
     par_corpus["label"] = par_db["label"].tolist()
     par_corpus["is_nar"] = par_db["is_nar"].tolist()
-    par_corpus["pred_proba"] = par_db["pred_proba"].tolist()
+    if print_proba:
+        par_corpus["pred_proba"] = par_db["pred_proba"].tolist()
     return par_corpus
 
 
-def get_labeled_doc_corpus(doc_idx, selected_par_indices, pred_info_df):
+def get_labeled_doc_corpus(doc_idx, selected_par_indices, pred_info_df, print_proba):
     doc_corpus = {}
     used_indices = []
     doc_db = pred_info_df.query("doc_idx == @doc_idx")
     for idx in selected_par_indices:
         if idx in used_indices:
             continue
-        doc_corpus[idx] = get_labeles_par_corpus(idx, doc_db)
+        doc_corpus[idx] = get_labeles_par_corpus(idx, doc_db, print_proba)
         used_indices.append(idx)
         if len(doc_corpus[idx]["sentenses"]) < 2:
             for i in [-1, 1]:
-                doc_corpus[idx + i] = get_labeles_par_corpus(idx + i, doc_db)
+                doc_corpus[idx + i] = get_labeles_par_corpus(idx + i, doc_db,print_proba)
                 used_indices.append(idx + 1)
     return doc_corpus
 
@@ -290,7 +291,7 @@ def print_error_par_text(dir_name, indices, pred_info_df, print_proba):
             "par_idx_in_doc"
         ].unique()
         doc_corpus = get_labeled_doc_corpus(
-            doc_idx, selected_par_indices, pred_info_df)
+            doc_idx, selected_par_indices, pred_info_df, print_proba)
         # print(
         #     "==========\n{} doc: {} paragraph with error".format(
         #         doc_idx, len(selected_par_indices)

@@ -382,45 +382,34 @@ def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba
 
 
 class ByDocFold():
-    def __init__(self, n_splits=3):
+    def __init__(self, n_splits=3, n_groups=1):
         self.n_splits = n_splits
+        self.n_groups = n_groups
 
     def split(self, X, y=None, groups=None):
         doc_indices = set(groups)
-        doc_count = len(doc_indices)
-        test_count = int(defines.TEST_PERSENT * doc_count)
+
         for i in range(self.n_splits):
-            test_docs = set(random.sample(doc_indices, test_count))
+            test_docs = set(random.sample(doc_indices, self.n_groups))
             train_docs = doc_indices - test_docs
-            train_idx = [i for i, j in enumerate(groups) if j in train_docs]
-            test_idx = [i for i, j in enumerate(groups) if j in test_docs]
+            train_idx = [idx for idx, j in enumerate(groups) if j in train_docs]
+            test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
             yield train_idx, test_idx
 
     def get_n_splits(self, X, y, groups=None):
         return self.n_splits
-
-    # def split(self, X, y=None, groups=None):
-    #     X, y, groups = indexable(X, y, groups)
-    #     indices = np.arange(_num_samples(X))
-    #     split_idx=0
-    #     for test_index in self._iter_test_masks(X, y, groups):
-    #         if split_idx < self.n_splits:
-    #             train_index = indices[np.logical_not(test_index)]
-    #             test_index = indices[test_index]
-    #             yield train_index, test_index
-
 class MyLeavePGroupsOut(LeavePGroupsOut):
     
     def __init__(self, n_groups, n_splits):
         self.n_groups = n_groups
-        self.n_splits=n_splits
-
+        self.n_splits = n_splits
+ 
     def split(self, X, y=None, groups=None):
         X, y, groups = indexable(X, y, groups)
         indices = np.arange(_num_samples(X))
         iter=0
         for test_index in super()._iter_test_masks(X, y, groups):
-            if iter >= self.n_splits:
+            if iter == self.n_splits:
                 break
             train_index = indices[np.logical_not(test_index)]
             test_index = indices[test_index]

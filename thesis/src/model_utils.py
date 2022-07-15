@@ -413,6 +413,8 @@ class MyLeavePGroupsOut(LeavePGroupsOut):
                 break
             train_index = indices[np.logical_not(test_index)]
             test_index = indices[test_index]
+            train_index+=1
+            test_index+=1
             iter+=1
             yield train_index, test_index
             

@@ -66,8 +66,12 @@ def get_random_sample(docs_map,seed=None):
     doc_idx = np.random.randint(1,len(docs_map.keys())+1)
     if map_key_is_str(docs_map):
         doc_idx=str(doc_idx)
-    seq_idx = np.random.randint(0,len(docs_map[doc_idx]['X']))
-    return docs_map[doc_idx]['X'][seq_idx]
+    if 'X' in docs_map[doc_idx]:
+        key='X'
+    else:
+        key='X_3_3'
+    seq_idx = np.random.randint(0,len(docs_map[doc_idx][key]))
+    return docs_map[doc_idx][key][seq_idx]
 
 
 def map_key_is_str(docs_map):

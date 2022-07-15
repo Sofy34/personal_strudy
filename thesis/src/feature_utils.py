@@ -135,7 +135,7 @@ def tfidf_fit(dir_name,per_word = True, per_lemma = True, analyzer = 'char',n_mi
         )
     return tfidf.fit(data_list)
 
-def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyzer = 'char',stop_words=[]):
+def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyzer = 'char',tf_suffix='',stop_words=[]):
     tf = tfidf_fit(dir_name=dir_name,per_word=per_word,per_lemma=per_lemma,analyzer=analyzer,stop_words=stop_words)
     tf_params = tf.get_params()
     tf_string = tf_params['analyzer'] if per_lemma==False else "lemma"
@@ -146,7 +146,7 @@ def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyze
     for i,doc_name in enumerate(sent_lemma_db_list):
         doc_prefix = common_utils.get_doc_idx_from_name(doc_name)
         X = tfidf_transform_doc(dir_name,doc_prefix,tf,per_lemma)
-        sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}.npz".format(doc_prefix,tf_string)), X)
+        sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}{}.npz".format(doc_prefix,tf_string,tf_suffix)), X)
         print("{}".format(i),end=" ")
     return tf
 
@@ -201,12 +201,14 @@ def merge_sent_pos_db(dir_name,doc_idx):
 ### Pack sentense features for CRF  ###
 
 curr_doc_db = {}
-def load_doc_features(dir_name,doc_idx,tf_types = ['word','char_wb','lemma'],merged_str="merged_db"):
+def load_doc_features(dir_name,doc_idx,tf_types = ['word','char_wb','lemma'],merged_str="merged_db",tf_suffix=''):
     global curr_doc_db
     curr_doc_db['merged'] = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_{}.csv".format(doc_idx,merged_str)))
     curr_doc_db['sim_vec']  = pd.read_csv(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_sent_sim_vec300_db.csv".format(doc_idx)))
     for tf_type in tf_types:
-        curr_doc_db['tfidf_{}'.format(tf_type)] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}.npz".format(doc_idx,tf_type)))
+        if 'char' in tf_type:
+            tf_suffix=''
+        curr_doc_db['tfidf_{}'.format(tf_type)] = sparse.load_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}{}.npz".format(doc_idx,tf_type,tf_suffix)))
     return curr_doc_db
 
 def save_doc_packed_features(doc_idx,dictionary_data):
@@ -407,14 +409,14 @@ def pack_all_doc_sentences(per_par=False,tf_types = ['word','char_wb']):
     print("{} sentenced packed for {} docs".format(len(X),len(sent_lemma_db_list)))
     return X,y,groups
 
-def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,neighbor_radius=2,sent_lemma_db_list=[],tf_types = ['word','char_wb'],merged_str="merged_db"):
+def pack_all_doc_sentences_to_map(dir_name,per_par=False,limit=0,doc_as_sequence=0,neighbor_radius=2,sent_lemma_db_list=[],tf_types = ['word','char_wb'],merged_str="merged_db",tf_suffix=''):
     docs_map = {}
     if len(sent_lemma_db_list) ==0:
         sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, dir_name,"*_sent_lemma_db.csv"))    
     total_sent = 0
     for i,doc_name in enumerate(sent_lemma_db_list):
         doc_idx = common_utils.get_doc_idx_from_name(doc_name) 
-        load_doc_features(dir_name,doc_idx,tf_types,merged_str)
+        load_doc_features(dir_name,doc_idx,tf_types,merged_str,tf_suffix)
         docs_map[doc_idx] = {}
         if per_par:
             if limit == 0:

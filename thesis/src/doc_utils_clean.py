@@ -135,6 +135,8 @@ def split_block_to_sentences(text_, merge_short):
     text = remove_multi_dots(text)
     text = remove_multi_x(text)
     text = remove_symbols(text)
+    text = unify_numbers(text)
+    text = replase_shekel_char(text)
     if merge_short:
         text = handle_short_sent_in_block(text)
 
@@ -149,6 +151,8 @@ def split_block_to_sentences(text_, merge_short):
             sent_list[i] = clean_item
     return sent_list
 
+def replase_shekel_char(text):
+    return re.sub(r'\u20AA',defines.SHEKEL,text)
 
 def remove_multi_dots(text):
     text_ = re.sub(r"\A\.", "", text)  # replase ".נקודה בתחילת משפט"
@@ -156,6 +160,8 @@ def remove_multi_dots(text):
     # return re.sub(r'\.{2,3}', '',text_) # replace .. and ... with whitespace
     return re.sub(r"\.{2,3}", ".", text_)  # replace .. and ... with .
 
+def unify_numbers(text,unify=' 123 '):
+    return re.sub(r'[0-9]{1,}',unify,text)
 
 def check_text_for_symbols(text):
     if re.search(r"[\t,\\t]", text):
@@ -550,8 +556,8 @@ def get_par_type_erase(par):
 
 def parse_all_docs(dir_name,merge_short_sent,doc_path_list=None):
     global doc_db, debug_db
-    save_docs_db(doc_path_list)
-    doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
+    save_docs_db(doc_path_list,dir_name)
+    doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,"doc_db.csv")
     doc_db = pd.read_csv(doc_db_path)
     debug_db = pd.DataFrame()
     doc_indices = doc_db["doc_idx_from_name"].values
@@ -560,10 +566,10 @@ def parse_all_docs(dir_name,merge_short_sent,doc_path_list=None):
         parse_doc(dir_name,int(doc_idx),merge_short_sent)
         print("{}".format(i),end=' ')
     doc_db.to_csv(
-        os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv"), index=False
+        os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,"doc_db.csv"), index=False
     )
     debug_db.to_csv(
-        os.path.join(os.getcwd(), defines.PATH_TO_DFS, "debug_db.csv"), index=False
+        os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, "debug_db.csv"), index=False
     )
     del doc_db
     del debug_db
@@ -587,9 +593,9 @@ def parse_doc(dir_name,doc_idx, merge_short_sent, single=False):
         )
 
 
-def add_new_doc(path):
+def add_new_doc(path,dir_name):
     global doc_db
-    doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, "doc_db.csv")
+    doc_db_path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, "doc_db.csv")
     doc_prefix = int(os.path.basename(path).split("_")[0])
     doc_db = pd.read_csv(doc_db_path)
     # if doc_prefix in doc_db['doc_idx_from_name'].values:

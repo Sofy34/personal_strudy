@@ -6,6 +6,7 @@ THERAPIST_HEB = "מטפל"
 CLIENT_HEB = "קליינט"
 SEGMENT_HEB = "סגמנט"
 PATH_TO_DFS = "dataframes"
+SHEKEL='שקל'
 CRF_SEQ_LEN = 6
 CRF_SEQ_STEP = 6
 CRF_NEIGHBOR_RADIUS = 2
@@ -48,6 +49,7 @@ SAMPLE_FEATURES = [
     "is_question",
     "sent_pos_in_par",
     "sent_pos_in_doc",
+    "par_pos_in_doc"
 ]
 COLOR_MAP = {1: "green", 0: "red"}
 ON_COLOR = {"label": "on_yellow", "pred": "on_cyan"}

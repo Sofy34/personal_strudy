@@ -1,3 +1,9 @@
+from sklearn_crfsuite.utils import flatten
+import common_utils
+from sklearn.metrics import euclidean_distances
+from sklearn.utils.multiclass import unique_labels
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
 from sklearn.base import BaseEstimator, TransformerMixin
 import torch.nn.functional as F
 import random
@@ -13,18 +19,56 @@ from transformers import AutoModel, BertTokenizerFast
 from torch.utils.data import TensorDataset, DataLoader, RandomSampler, SequentialSampler
 from transformers import AdamW
 import sys
+from transformers import BertModel, BertTokenizerFast
+import time
+
 sys.path.append('./src/')
 
-import numpy as np
-from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
-from sklearn.utils.multiclass import unique_labels
-from sklearn.metrics import euclidean_distances
-import common_utils
-from sklearn_crfsuite.utils import flatten
 
 # specify GPU
 # device = torch.device("cuda")
+
+
+def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10):
+    cv_db = cv_db_.copy()
+    alephbert_tokenizer = BertTokenizerFast.from_pretrained(
+        'onlplab/alephbert-base')
+    alephbert_model = BertModel.from_pretrained(
+        'onlplab/alephbert-base', return_dict=False)
+    bert_preprocess = BertXYTransformer(tokenizer=alephbert_tokenizer)
+
+    for split, indices in cv_splits.items():
+        single_cv_db = pd.DataFrame()
+        print("{} split started...".format(split))
+        X_train = model_utils.select_docs_from_map(docs_map, indices['train'])
+        X_val = model_utils.select_docs_from_map(docs_map, indices['test'])
+
+        train_tensor_map = bert_preprocess.fit_transform(
+            X=X_train)
+        val_tensor_map = bert_preprocess.fit_transform(
+            X=X_val)
+        start_time = time.time()
+        bert_estimator = BertTrainValidator(pretrained_model=alephbert_model)
+        valid_dict = bert_estimator.train_validate(
+            train_tensor_map, val_tensor_map, epoch)
+        fit_time = time.time()-start_time
+        print("{} split train_validate took {:.2f} sec".format(split, fit_time))
+        single_cv_db['bert_group'] = val_tensor_map['groups']
+        single_cv_db['bert_split'] = split
+
+        preds = valid_dict['best_preds']
+        preds_np = preds.detach().cpu().numpy()
+        preds_label = np.argmax(preds_np, axis=1)
+        preds_proba = F.softmax(preds, dim=-1).detach().cpu().numpy()
+
+        single_cv_db['bert_predicted'] = preds_label
+        single_cv_db['bert_true'] = valid_dict['best_true']
+        single_cv_db['bert_proba_0'] = preds_proba[:, 0]
+        single_cv_db['bert_proba_1'] = preds_proba[:, 1]
+
+        cv_db = pd.concat([cv_db, single_cv_db],
+                          ignore_index=True, axis=0, copy=False)
+    return cv_db
 
 
 def train_test_split_doc(doc_indices, test_percent, random_state=42):
@@ -255,7 +299,9 @@ def get_cross_entropy(train_labels):
     print("Class Weights:", class_weights)
     # converting list of class weights to a tensor
     weights = torch.tensor(class_weights, dtype=torch.float)
-
+    if len(weights) < 2:
+        print("get_cross_entropy() ERROR: len(weights) is {}".format(len(weights)))
+        return
     # push to GPU
     # weights = weights.to(device)
 
@@ -337,18 +383,20 @@ def evaluate(model, val_dataloader, cross_entropy):
 
     # empty list to save the model predictions
     total_preds = []
-
+    total_labels = []
+    raw_preds= torch. empty(0, 2)
     # iterate over batches
     for step, batch in enumerate(val_dataloader):
 
         # Progress update every 50 batches.
-        #         if step % 50 == 0 and not step == 0:
+        if step % 50 == 0 and not step == 0:
 
-        # Calculate elapsed time in minutes.
-        #             elapsed = format_time(time.time() - t0)
+            # Calculate elapsed time in minutes.
+            elapsed = format_time(time.time() - t0)
 
         # Report progress.
-        #       print('  Batch {:>5,}  of  {:>5,}.'.format(step, len(val_dataloader)))
+            print('  Batch {:>5,}  of  {:>5,}.'.format(
+                step, len(val_dataloader)))
 
         # push the batch to gpu
         #     batch = [t.to(device) for t in batch]
@@ -360,23 +408,25 @@ def evaluate(model, val_dataloader, cross_entropy):
 
             # model predictions
             preds = model(sent_id, mask)
-
             # compute the validation loss between actual and predicted values
             loss = cross_entropy(preds, labels)
 
             total_loss = total_loss + loss.item()
 
-            preds = preds.detach().cpu().numpy()
+            preds_np = preds.detach().cpu().numpy()
 
-            total_preds.append(preds)
+            total_preds.append(preds_np)
+            raw_preds = torch.cat([raw_preds,preds], dim=0)
+            total_labels.append(labels)
+
 
     # compute the validation loss of the epoch
     avg_loss = total_loss / len(val_dataloader)
 
     # reshape the predictions in form of (number of samples, no. of classes)
     total_preds = np.concatenate(total_preds, axis=0)
-
-    return avg_loss, total_preds
+    total_labels = np.concatenate(total_labels, axis=0)
+    return avg_loss, total_preds, raw_preds, total_labels
 
 
 def train_validate(model_name, model, optimizer, train_dataloader, val_dataloader, cross_entropy, epochs=10):
@@ -388,11 +438,11 @@ def train_validate(model_name, model, optimizer, train_dataloader, val_dataloade
     train_losses = []
     valid_losses = []
 
-    best_dict = {}
+    valid_dict = {}
 
     # for each epoch
     for epoch in range(epochs):
-
+        valid_dict[epoch] = {}
         print('\n Epoch {:} / {:}'.format(epoch + 1, epochs))
 
         # train model
@@ -400,7 +450,9 @@ def train_validate(model_name, model, optimizer, train_dataloader, val_dataloade
             model, optimizer, train_dataloader, cross_entropy)
 
         # evaluate model
-        valid_loss, _ = evaluate(model, val_dataloader, cross_entropy)
+        valid_loss, total_preds, raw_preds, total_labels = evaluate(
+            model, val_dataloader, cross_entropy)
+        print("train_validate() raw_preds",raw_preds)
 
         # save the best model
         if valid_loss < best_valid_loss:
@@ -408,15 +460,18 @@ def train_validate(model_name, model, optimizer, train_dataloader, val_dataloade
             print("Saving best model {}".format(model_name))
             torch.save(model.state_dict(), model_name)
             best_dict = model.state_dict()
+            valid_dict['best_dict'] = best_dict
+            valid_dict['best_preds'] = raw_preds
+            valid_dict['best_true'] = total_labels
 
         # append training and validation loss
-        train_losses.append(train_loss)
-        valid_losses.append(valid_loss)
+        valid_dict[epoch]['train_loss'] = train_loss
+        valid_dict[epoch]['valid_loss'] = valid_loss
 
         print(f'\nTraining Loss: {train_loss:.3f}')
-        print(f'Validation Loss: {valid_loss:.3f}')
+        print(f'\nValidation Loss: {valid_loss:.3f}')
 
-    return best_dict
+    return valid_dict
 
 
 def load_saved_bert_model(model, path):
@@ -434,6 +489,47 @@ def get_prediction(model, test_map):
 
         preds_proba = F.softmax(preds, dim=-1).detach().cpu().numpy()
     return preds_label, preds_proba
+
+
+class BertXYTransformer(TransformerMixin, BaseEstimator):
+    def __init__(self, tokenizer=None, param=None):
+        self.tokenizer = tokenizer
+        print('{}>>>>>>>init() called'.format(self.__class__.__name__))
+        self.param = param
+
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+
+    def fit(self, X, indices=None):
+        return self
+
+    def fit_transform(self, X, y=None, **fit_params):
+        return self.fit(X, **fit_params).transform(X=X)
+
+    def transform(self, X, y=None):
+        X_ = []
+        y_ = []
+        groups_ = []
+        indices = X.keys()
+        print('{}>>>>>>>transform() called for {} docs'.format(
+            self.__class__.__name__, len(indices)))
+        X_tensor_map = {}
+        for doc in indices:
+            X_.extend(X[doc]["X_bert"])
+            y_.extend(X[doc]["y_bert"])
+            groups_.extend([doc for i in range(len(X[doc]["y_bert"]))])
+        X_tokens = get_test_tokens(self.tokenizer, X_)
+        X_tensor_map = convert_single_token2tensor(
+            X_tokens)
+        print("y labels are\n".format(y_),end=' ')
+        X_tensor_map['y'] = convert_y_tokens2tensor(y_)
+        X_tensor_map['y_labels'] = y_
+        X_tensor_map['groups'] = groups_
+        print('{}>>>>>>>transform() done for {} samples, labels are {}'.format(
+            self.__class__.__name__, len(X_),np.unique(y_)))
+        return X_tensor_map
 
 
 class BertTransformer(TransformerMixin, BaseEstimator):
@@ -468,7 +564,6 @@ class BertTransformer(TransformerMixin, BaseEstimator):
             X_tokens)
 
         return X_tensor_map
-
 
 
 class BertClassifier(ClassifierMixin, BaseEstimator):
@@ -512,6 +607,65 @@ class BertClassifier(ClassifierMixin, BaseEstimator):
         preds_label=np.argmax(preds_np, axis=1)
         return common_utils.convert_binary_label_to_str(preds_label)
 
+    def predict_proba(self, X):
+        check_is_fitted(self, 'is_fitted_')
+        preds = self.wrapped_model(X['seq'], X['mask'])
+        preds_proba = F.softmax(preds, dim=-1).detach().cpu().numpy()
+        return preds_proba
+
+    def score(self, X, y, sample_weight=None):
+        print('{}>>>>>>> score() called'.format(self.__class__.__name__))
+        return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
+
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+
+
+class BertTrainValidator(ClassifierMixin, BaseEstimator):
+
+    def __init__(self, pretrained_model=None, batch_size=1024, model_name="bert"):
+        print('{}>>>>>>> init() called'.format(self.__class__.__name__))
+        self.model_name = model_name
+        self._estimator_type = "classifier"
+        self.pretrained_model = pretrained_model
+        self.wrapped_model = wrap_pretained_model(self.pretrained_model)
+        self.optimizer = get_optimizer(self.wrapped_model)
+        self.batch_size = batch_size
+
+    def train_validate(self, X_train, X_val, epoch = 10):
+        print('{}>>>>>>> train_validate() called'.format(self.__class__.__name__))
+        self.train_dataloader = get_single_loader(X_train, self.batch_size)
+        self.val_dataloader = get_single_loader(X_val, self.batch_size)
+        self.cross_entropy = get_cross_entropy(X_train['y_labels'])
+        self.classes_ = np.unique(X_train['y_labels'])
+        valid_dict = train_validate(
+            self.model_name,
+            self.wrapped_model,
+            self.optimizer,
+            self.train_dataloader,
+            self.val_dataloader,
+            self.cross_entropy,
+            epoch)
+        self.is_fitted_ = True
+        return valid_dict
+
+    def fit_transform(self, X_train, y_train, X_val, y_val):
+        return self.fit(self, X_train, y_train, X_val, y_val)
+
+    def set_params(self, **parameters):
+        for parameter, value in parameters.items():
+            setattr(self, parameter, value)
+        return self
+
+    def predict(self, X):
+        print('{}>>>>>>> predict() called'.format(self.__class__.__name__))
+        check_is_fitted(self, 'is_fitted_')
+        preds = self.wrapped_model(X['seq'], X['mask'])
+        preds_np = preds.detach().cpu().numpy()
+        preds_label = np.argmax(preds_np, axis=1)
+        return common_utils.convert_binary_label_to_str(preds_label)
 
     def predict_proba(self, X):
         check_is_fitted(self, 'is_fitted_')

@@ -34,6 +34,7 @@ from sklearn.utils import indexable
 import sys
 sys.path.append('./src/')
 from feature_utils import get_prediction_report
+from sklearn.linear_model import LogisticRegression
 
 global error_compare_file
 global tf_features
@@ -48,6 +49,35 @@ def get_report_from_splits(cv_db,prefix):
         y_true=cv_db[cv_db['{}_split'.format(prefix)]==split]['{}_true'.format(prefix)].tolist()
         get_prediction_report(y_true,y_pred,np.unique(y_true),"Split {}".format(split))
 
+def prepared_cross_validate_ensemble(cv_db_, prediction_db_, cv_splits):
+    prediction_db=prediction_db_.copy()
+    cv_db = cv_db_.copy()
+
+    for split, indices in cv_splits.items():
+        single_cv_db = pd.DataFrame()
+        print("{} split started...".format(split))
+        print("train:",indices['train'])
+        print("test:",indices['test'])
+
+        X_train=prediction_db[prediction_db['crf_group'].isin(indices['train'])][['crf_proba_0','crf_proba_1','bert_proba_0','bert_proba_1']]
+        y_train=prediction_db[prediction_db['crf_group'].isin(indices['train'])]['bert_true']
+        X_test=prediction_db[prediction_db['crf_group'].isin(indices['test'])][['crf_proba_0','crf_proba_1','bert_proba_0','bert_proba_1']]
+        y_test=prediction_db[prediction_db['crf_group'].isin(indices['test'])]['bert_true']
+        y_test_groups=prediction_db[prediction_db['crf_group'].isin(indices['test'])]['crf_group']
+        ens_clf = LogisticRegression(random_state=0).fit(X_train, y_train)
+        ens_clf_pred=ens_clf.predict(X_test)
+        single_cv_db['ens_predicted'] = ens_clf_pred
+        ens_clf_pred_proba=ens_clf.predict_proba(X_test)
+        single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
+        single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
+        single_cv_db['ens_group'] = y_test_groups.tolist()
+        single_cv_db['ens_split'] = split
+        single_cv_db['ens_true'] = y_test.tolist()
+
+        cv_db=pd.concat([cv_db,single_cv_db],ignore_index=True,axis=0,copy=False)
+    return cv_db
+
+
 def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, **crf_params):
     cv_db = cv_db_.copy()
     for split, indices in cv_splits.items():
@@ -61,8 +91,8 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
         crf = CRF(
             max_iterations=100,
             all_possible_transitions=True,
-            algorithm='lbfgs'  # ,
-            # **crf_params
+            algorithm='lbfgs',
+            **crf_params
         ).fit(X_train, y_train)
         fit_time = time.time()-start_time
         print("{} split fit took {:.2f} sec".format(split, fit_time))

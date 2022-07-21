@@ -1,3 +1,7 @@
+from operator import itemgetter
+from sklearn.model_selection import LeavePGroupsOut
+import time
+import common_utils
 import numpy as np
 from sklearn_crfsuite.utils import flatten
 import pandas as pd
@@ -29,11 +33,53 @@ from sklearn.preprocessing._label import LabelEncoder
 from sklearn.utils import indexable
 import sys
 sys.path.append('./src/')
-import common_utils
-import time
-from sklearn.model_selection import LeavePGroupsOut
+from feature_utils import get_prediction_report
+
 global error_compare_file
 global tf_features
+
+
+def flatten_groups(groups, y):
+    return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
+
+def get_report_from_splits(cv_db,prefix):
+    for split in cv_db['{}_split'.format(prefix)].unique():
+        y_pred=cv_db[cv_db['{}_split'.format(prefix)]==split]['{}_predicted'.format(prefix)].tolist()
+        y_true=cv_db[cv_db['{}_split'.format(prefix)]==split]['{}_true'.format(prefix)].tolist()
+        get_prediction_report(y_true,y_pred,np.unique(y_true),"Split {}".format(split))
+
+def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, **crf_params):
+    cv_db = cv_db_.copy()
+    for split, indices in cv_splits.items():
+        single_cv_db = pd.DataFrame()
+        print("{} split started...".format(split))
+        X_train, y_train, groups_train = get_X_y_by_doc_indices(
+            docs_map, indices['train'], seq_len, step)
+        X_test, y_test, groups_test = get_X_y_by_doc_indices(
+            docs_map, indices['test'], seq_len, step)
+        start_time = time.time()
+        crf = CRF(
+            max_iterations=100,
+            all_possible_transitions=True,
+            algorithm='lbfgs'  # ,
+            # **crf_params
+        ).fit(X_train, y_train)
+        fit_time = time.time()-start_time
+        print("{} split fit took {:.2f} sec".format(split, fit_time))
+        single_cv_db['crf_group'] = flatten_groups(groups_test, y_test)
+        single_cv_db['crf_split'] = split
+        single_cv_db['crf_predicted'] = flatten(crf.predict(X_test))
+        predict_time = time.time() - fit_time - start_time
+        print("{} split predict took {:.2f} sec".format(split, predict_time))
+        single_cv_db['crf_true'] = flatten(y_test)
+        crf_proba = get_predicted_prob_from_dict(
+            flatten(crf.predict_marginals(X_test)))
+        single_cv_db['crf_proba_0'] = crf_proba[:, 0]
+        single_cv_db['crf_proba_1'] = crf_proba[:, 1]
+
+        cv_db=pd.concat([cv_db,single_cv_db],ignore_index=True,axis=0,copy=False)
+    return cv_db
+
 
 
 def get_info_on_pred(y_pred, y_pred_proba, y_test, groups_test):
@@ -273,7 +319,8 @@ def get_labeled_doc_corpus(doc_idx, selected_par_indices, pred_info_df, print_pr
         used_indices.append(idx)
         if len(doc_corpus[idx]["sentenses"]) < 2:
             for i in [-1, 1]:
-                doc_corpus[idx + i] = get_labeles_par_corpus(idx + i, doc_db,print_proba)
+                doc_corpus[idx +
+                           i] = get_labeles_par_corpus(idx + i, doc_db, print_proba)
                 used_indices.append(idx + 1)
     return doc_corpus
 
@@ -381,6 +428,100 @@ def print_labeled_paragraph_by_columns(doc_idx, par_idx, par_corpus, print_proba
     return par_columns
 
 
+def print_labeled_paragraph_single_column(doc_idx, par_idx, par_corpus):
+    par_columns = pd.DataFrame()
+    corr_par = ""
+    start = "<span class="
+    corr_style = {1: start + "'corrStyle'>", 0: "<span>"}
+    end = "</span>"
+    for i, sent in enumerate(par_corpus["sentences"]):
+        corr_par += (
+            "".join(
+                [corr_style[par_corpus["label"][i]], sent, end]) + ". "
+        )
+    par_columns.loc[0, "doc_idx"] = int(doc_idx)
+    par_columns.loc[0, "par_idx"] = int(par_idx)
+    par_columns.loc[0, "correct"] = corr_par
+    par_columns.loc[0, 'par_type'] = par_corpus['par_type']
+
+    return par_columns
+
+
+def assemble_test_from_parsed(dir_name, doc_idx):
+    doc_corpus = pd.read_csv(os.path.join(
+        os.getcwd(), defines.PATH_TO_DFS, dir_name, "{:02d}_sent_db.csv".format(doc_idx)))
+    colored_df = pd.DataFrame()
+    for par_idx in doc_corpus['par_idx_in_doc'].unique():
+        par_corpus = {}
+        par_corpus['sentences'] = doc_corpus.query(
+            'par_idx_in_doc == @par_idx')['text'].tolist()
+        par_corpus['label'] = doc_corpus.query(
+            'par_idx_in_doc == @par_idx')['is_nar'].tolist()
+        par_corpus['par_type'] = doc_corpus.query(
+            'par_idx_in_doc == @par_idx')['par_type'].unique()
+        par_columns = print_labeled_paragraph_single_column(
+            doc_idx, par_idx, par_corpus)
+        colored_df = pd.concat(
+            [colored_df, par_columns], ignore_index=True)
+    colored_df["doc_idx"] = colored_df["doc_idx"].astype(int)
+    colored_df["par_idx"] = colored_df["par_idx"].astype(int)
+    table = colored_df.to_html(escape=False, justify="center")
+    # with open(os.path.join(os.getcwd(),defines.PATH_TO_DFS,"df_style.css"),'r') as f:
+    #     style_lines=[]
+    #     style_lines.append('<style>')
+    #     style_lines.extend(f.readlines())
+    #     style_lines.append('<\style>')
+
+    html = colored_df.to_html(escape=False, justify="center")
+    html = r'<link rel="stylesheet" type="text/css" href="df_style.css" /><br>' + html
+    # write html to file
+    err_report_path = os.path.join(
+        os.getcwd(), defines.PATH_TO_DFS, dir_name, "{:02d}_assembled.html".format(
+            doc_idx)
+    )
+    text_file = open(err_report_path, "w")
+    # text_file = open("error_analysis.html", "w")
+    text_file.write(html)
+    text_file.close()
+
+
+def get_test_train_splits(doc_indices, test_doc_num=10, n_splits=3, seed=42):
+    cv_splits = {}
+
+    gsf = GroupSplitFold(n_splits=n_splits, n_groups=test_doc_num)
+    i = 0
+    for tr, ts in gsf.split(X=doc_indices, groups=doc_indices, seed=seed):
+        cv_splits[i] = {}
+        cv_splits[i]['test'] = np.asarray(itemgetter(*ts)(doc_indices))
+        cv_splits[i]['train'] = np.asarray(itemgetter(*tr)(doc_indices))
+        i += 1
+    return cv_splits
+
+
+class GroupSplitFold():
+    def __init__(self, n_splits=3, n_groups=1):
+        self.n_splits = n_splits
+        self.n_groups = n_groups
+
+    def split(self, X, y=None, groups=None, seed=None):
+        doc_indices = set(groups)
+        total_test_idx = set(random.sample(
+            doc_indices, self.n_groups*self.n_splits))
+        if seed:
+            random.seed(seed)
+        for i in range(self.n_splits):
+            test_docs = set(random.sample(total_test_idx, self.n_groups))
+            total_test_idx = total_test_idx - test_docs
+            train_docs = doc_indices - test_docs
+            train_idx = [idx for idx, j in enumerate(
+                groups) if j in train_docs]
+            test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
+            yield train_idx, test_idx
+
+    def get_n_splits(self, X, y, groups=None):
+        return self.n_splits
+
+
 class ByDocFold():
     def __init__(self, n_splits=3, n_groups=1):
         self.n_splits = n_splits
@@ -392,7 +533,8 @@ class ByDocFold():
         for i in range(self.n_splits):
             test_docs = set(random.sample(doc_indices, self.n_groups))
             train_docs = doc_indices - test_docs
-            train_idx = [idx for idx, j in enumerate(groups) if j in train_docs]
+            train_idx = [idx for idx, j in enumerate(
+                groups) if j in train_docs]
             test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
             yield train_idx, test_idx
 
@@ -696,7 +838,8 @@ class MyVotingClassifier(VotingClassifier):
         else:  # 'hard' voting
             predictions = self._predict(X)
             maj = np.apply_along_axis(
-                lambda x: np.argmax(np.bincount(x, weights=self._weights_not_none)),
+                lambda x: np.argmax(np.bincount(
+                    x, weights=self._weights_not_none)),
                 axis=1,
                 arr=predictions,
             )

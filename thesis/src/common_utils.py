@@ -102,6 +102,13 @@ def get_y_labels(docs_map,indices,seq_len=3,step=3):
         y_l.extend(docs_map[doc]["y_{}_{}".format(seq_len, step)])
     return y_l
 
+def get_groups_labels(docs_map,indices,seq_len=3,step=3):
+    groups = []
+    for doc in indices:
+        len_y=len(docs_map[doc]["y_{}_{}".format(seq_len, step)])
+        groups.extend([doc for i in range(len_y)])
+    return groups
+
 def select_dic_keys(docs_map,keys):
     return {key:docs_map[key] for key in keys}
 
@@ -117,10 +124,15 @@ def get_x_y_by_index(docs_map,indices):
     return select_dic_keys(docs_map,indices),get_y_labels(docs_map,indices)
 
 
+def get_x_y_group_by_index(docs_map,indices):
+    X,y=get_x_y_by_index(docs_map,indices)
+    return X,y,get_groups_labels(docs_map,indices)
+
 def get_docs_map(dir_name,docs_map_name,per_par,seq_len,step):
     docs_map=read_docs_map(dir_name,docs_map_name)
     docs_map=convert_str_keys_to_int(docs_map)
-    reshape_docs_map_to_seq(docs_map,per_par,seq_len,step)
+    if not 'X_{}_{}'.format(seq_len,step) in docs_map[1]:
+        reshape_docs_map_to_seq(docs_map,per_par,seq_len,step)
     add_sent_to_docs_map(dir_name,docs_map)
     return docs_map
     
@@ -138,3 +150,9 @@ def add_sent_to_docs_map(dir_name, docs_map):
         sent_db = pd.read_csv(sent_db_path, usecols=['text', 'is_nar'])
         docs_map[key]['X_bert'] = sent_db['text'].tolist()
         docs_map[key]['y_bert'] = sent_db['is_nar'].tolist()
+        
+        
+def save_db(db,dir_name,file_name,keep_index=False):
+    path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.csv".format(file_name))
+    print("Saving {},  index {}".format(path,keep_index))
+    db.to_csv(path,index=keep_index)

@@ -53,12 +53,24 @@ def convert_to_list(_dic):
 
 def convert_to_python_types(_dic):
     dic = {}
-    for key,val in _dic.items():
-        if not isinstance(val,str):
-            dic[key]=val.item()
-        else:
-            dic[key]=val
+    if isinstance(_dic,dict):
+        for key,val in _dic.items():
+            if isinstance(val,dict):
+                dic[key]={}
+                for subkey,subval in val.items():
+                    dic[key][subkey]=convert_item_to_python_types(subval)
+            else:
+                dic[key]=convert_item_to_python_types(val)
     return dic
+
+def convert_item_to_python_types(val):
+    new_val=val
+    if not isinstance(val,str):
+        if  isinstance(val,np.ndarray):
+            new_val =val.tolist()
+        else:
+            new_val=val.item()
+    return new_val
 
 def get_random_sample(docs_map,seed=None):
     if not seed is None:
@@ -156,3 +168,11 @@ def save_db(db,dir_name,file_name,keep_index=False):
     path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.csv".format(file_name))
     print("Saving {},  index {}".format(path,keep_index))
     db.to_csv(path,index=keep_index)
+
+def save_json(dic_,dir_name,file_name):
+    dic=dic_.copy()
+    path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.json".format(file_name))
+    dic=convert_to_python_types(dic)
+    print("Saving {}".format(path))
+    with open(path, 'w') as fp:
+        json.dump(dic, fp)

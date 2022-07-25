@@ -1,3 +1,5 @@
+from sklearn.linear_model import LogisticRegression
+from feature_utils import get_prediction_report
 from operator import itemgetter
 from sklearn.model_selection import LeavePGroupsOut
 import time
@@ -19,12 +21,12 @@ from sklearn.pipeline import Pipeline
 from sklearn.model_selection import _validation
 
 from sklearn.base import BaseEstimator, ClassifierMixin, TransformerMixin
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted,_num_samples
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted, _num_samples
 from sklearn.utils.multiclass import unique_labels
 from sklearn.metrics import euclidean_distances
 from joblib import Parallel, logger
 from sklearn.utils.fixes import delayed
-from sklearn.ensemble import VotingClassifier,StackingClassifier
+from sklearn.ensemble import VotingClassifier, StackingClassifier
 from sklearn.ensemble._stacking import _BaseStacking
 from sklearn.ensemble._base import _fit_single_estimator
 from sklearn.base import clone
@@ -33,8 +35,6 @@ from sklearn.preprocessing._label import LabelEncoder
 from sklearn.utils import indexable
 import sys
 sys.path.append('./src/')
-from feature_utils import get_prediction_report
-from sklearn.linear_model import LogisticRegression
 
 global error_compare_file
 global tf_features
@@ -43,40 +43,108 @@ global tf_features
 def flatten_groups(groups, y):
     return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
 
-def get_report_from_splits(cv_db,prefix):
-    for split in cv_db['{}_split'.format(prefix)].unique():
-        y_pred=cv_db[cv_db['{}_split'.format(prefix)]==split]['{}_predicted'.format(prefix)].tolist()
-        y_true=cv_db[cv_db['{}_split'.format(prefix)]==split]['{}_true'.format(prefix)].tolist()
-        get_prediction_report(y_true,y_pred,np.unique(y_true),"Split {}".format(split))
 
-def prepared_cross_validate_ensemble(cv_db_, prediction_db_, cv_splits):
-    prediction_db=prediction_db_.copy()
+def get_report_from_splits(cv_db, prefix):
+    for split in cv_db['{}_split'.format(prefix)].unique():
+        y_pred = cv_db[cv_db['{}_split'.format(
+            prefix)] == split]['{}_predicted'.format(prefix)].tolist()
+        y_true = cv_db[cv_db['{}_split'.format(
+            prefix)] == split]['{}_true'.format(prefix)].tolist()
+        get_prediction_report(y_true, y_pred, np.unique(
+            y_true), "Split {}".format(split))
+
+
+def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_splits, docs_map=None):
+    prediction_db = prediction_db_.copy()
     cv_db = cv_db_.copy()
+    cols = ['crf_proba_0', 'crf_proba_1', 'bert_proba_0', 'bert_proba_1']
 
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
         print("{} split started...".format(split))
-        print("train:",indices['train'])
-        print("test:",indices['test'])
-
-        X_train=prediction_db[prediction_db['crf_group'].isin(indices['train'])][['crf_proba_0','crf_proba_1','bert_proba_0','bert_proba_1']]
-        y_train=prediction_db[prediction_db['crf_group'].isin(indices['train'])]['bert_true']
-        X_test=prediction_db[prediction_db['crf_group'].isin(indices['test'])][['crf_proba_0','crf_proba_1','bert_proba_0','bert_proba_1']]
-        y_test=prediction_db[prediction_db['crf_group'].isin(indices['test'])]['bert_true']
-        y_test_groups=prediction_db[prediction_db['crf_group'].isin(indices['test'])]['crf_group']
-        ens_clf = LogisticRegression(random_state=0).fit(X_train, y_train)
-        ens_clf_pred=ens_clf.predict(X_test)
+        print("train:", indices['train'])
+        print("test:", indices['test'])
+        if(estimator.__class__.__name__ == 'CRF'):
+            X_train, y_train, X_test, y_test = pack_train_test_for_crf(
+                prediction_db, indices, cols, docs_map)
+        else:
+            X_train, y_train, X_test, y_test = pack_train_test_for_estimator(
+                prediction_db, indices, cols)
+        y_test_groups = prediction_db[prediction_db['crf_group'].isin(
+            indices['test'])]['crf_group']
+        ens_clf = estimator.fit(X_train, y_train)
+        ens_clf_pred = ens_clf.predict(X_test)
+        if(estimator.__class__.__name__ == 'CRF'):
+            ens_clf_pred_proba = get_predicted_prob_from_dict(
+                flatten(ens_clf.predict_marginals(X_test)))
+            ens_clf_pred=flatten(ens_clf_pred)
+            y_true = flatten(y_test)
+        else:
+            ens_clf_pred_proba = ens_clf.predict_proba(X_test)
+            y_true=y_test.tolist()
         single_cv_db['ens_predicted'] = ens_clf_pred
-        ens_clf_pred_proba=ens_clf.predict_proba(X_test)
         single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
         single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
         single_cv_db['ens_group'] = y_test_groups.tolist()
         single_cv_db['ens_split'] = split
-        single_cv_db['ens_true'] = y_test.tolist()
+        single_cv_db['ens_true'] = y_true
 
-        cv_db=pd.concat([cv_db,single_cv_db],ignore_index=True,axis=0,copy=False)
+        cv_db = pd.concat([cv_db, single_cv_db],
+                          ignore_index=True, axis=0, copy=False)
     return cv_db
 
+
+def pack_train_test_for_estimator(prediction_db, indices, cols):
+    X_train = prediction_db[prediction_db['crf_group'].isin(
+        indices['train'])][cols]
+    y_train = prediction_db[prediction_db['crf_group'].isin(
+        indices['train'])]['bert_true']
+    X_test = prediction_db[prediction_db['crf_group'].isin(
+        indices['test'])][cols]
+    y_test = prediction_db[prediction_db['crf_group'].isin(
+        indices['test'])]['bert_true']
+    return X_train, y_train, X_test, y_test
+
+
+# def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
+#     X_flat = []
+#     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['train'])].iterrows():
+#         item = {}
+#         for feature in cols:
+#             item[feature] = row[feature]
+#         X_flat.append(item)
+#     y_train = common_utils.get_y_labels(docs_map, indices['train'])
+#     X_train = common_utils.reshape_as_list(y_train, X_flat)
+#     X_flat = []
+#     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['test'])].iterrows():
+#         item = {}
+#         for feature in cols:
+#             item[feature] = row[feature]
+#         X_flat.append(item)
+#     y_test = common_utils.get_y_labels(docs_map, indices['test'])
+#     X_test = common_utils.reshape_as_list(y_test, X_flat)
+#     return X_train, y_train, X_test, y_test
+
+def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
+    X_flat = []
+    for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['train'])].iterrows():
+        item = {}
+        for feature in cols:
+            item[feature] = row[feature]
+        X_flat.append(item)
+    y= prediction_db[prediction_db['crf_group'].isin(indices['train'])]['crf_true']
+    X_train = common_utils.reshape_to_seq(X_flat,8,8)
+    y_train = common_utils.reshape_to_seq(y,8,8)
+    X_flat = []
+    for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['test'])].iterrows():
+        item = {}
+        for feature in cols:
+            item[feature] = row[feature]
+        X_flat.append(item)
+    y= prediction_db[prediction_db['crf_group'].isin(indices['test'])]['crf_true']
+    y_test =  common_utils.reshape_to_seq(y,8,8)
+    X_test =  common_utils.reshape_to_seq(X_flat,8,8)
+    return X_train, y_train, X_test, y_test
 
 def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, **crf_params):
     cv_db = cv_db_.copy()
@@ -95,21 +163,21 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
             **crf_params
         ).fit(X_train, y_train)
         fit_time = time.time()-start_time
-        print("{} split fit took {:.2f} sec".format(split, fit_time))
+        print("{} split fit took {}".format(split, time.strftime("%H:%M:%S", time.gmtime(fit_time))))
         single_cv_db['crf_group'] = flatten_groups(groups_test, y_test)
         single_cv_db['crf_split'] = split
         single_cv_db['crf_predicted'] = flatten(crf.predict(X_test))
         predict_time = time.time() - fit_time - start_time
-        print("{} split predict took {:.2f} sec".format(split, predict_time))
+        print("{} split predict took {}".format(split, time.strftime("%H:%M:%S", time.gmtime(predict_time))))
         single_cv_db['crf_true'] = flatten(y_test)
         crf_proba = get_predicted_prob_from_dict(
             flatten(crf.predict_marginals(X_test)))
         single_cv_db['crf_proba_0'] = crf_proba[:, 0]
         single_cv_db['crf_proba_1'] = crf_proba[:, 1]
 
-        cv_db=pd.concat([cv_db,single_cv_db],ignore_index=True,axis=0,copy=False)
+        cv_db = pd.concat([cv_db, single_cv_db],
+                          ignore_index=True, axis=0, copy=False)
     return cv_db
-
 
 
 def get_info_on_pred(y_pred, y_pred_proba, y_test, groups_test):
@@ -570,30 +638,32 @@ class ByDocFold():
 
     def get_n_splits(self, X, y, groups=None):
         return self.n_splits
+
+
 class MyLeavePGroupsOut(LeavePGroupsOut):
-    
+
     def __init__(self, n_groups, n_splits):
         self.n_groups = n_groups
         self.n_splits = n_splits
- 
+
     def split(self, X, y=None, groups=None):
         X, y, groups = indexable(X, y, groups)
         indices = np.arange(_num_samples(X))
-        iter=0
+        iter = 0
         for test_index in super()._iter_test_masks(X, y, groups):
             if iter == self.n_splits:
                 break
             train_index = indices[np.logical_not(test_index)]
             test_index = indices[test_index]
-            train_index+=1
-            test_index+=1
-            iter+=1
+            train_index += 1
+            test_index += 1
+            iter += 1
             yield train_index, test_index
-            
+
     def get_n_splits(self, X=None, y=None, groups=None):
         return self.n_splits
 
-            
+
 class DocsMapFold():
     def __init__(self, n_splits=3):
         self.n_splits = n_splits
@@ -649,30 +719,27 @@ def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=F
 
 class CrfTransformer(TransformerMixin, BaseEstimator):
 
-    def __init__(self, seq_len=3, step=3, param=None):  
+    def __init__(self, seq_len=3, step=3, param=None):
         print('{}>>>>>>>init() called'.format(self.__class__.__name__))
         self.seq_len = seq_len
         self.step = step
         self.param = param
 
-
-    
     def set_params(self, **parameters):
         for parameter, value in parameters.items():
             setattr(self, parameter, value)
         return self
-    
+
     def fit_transform(self, X, y=None, **fit_params):
         return self.fit(X=X).transform(X=X, **fit_params)
 
     def fit(self, X, y=None, **fit_params):
         return self
-    
 
     def transform(self, X, y=None, **fit_params):
         print('{}>>>>>>>transform() called'.format(self.__class__.__name__))
         X_l = []
-        indices=X.keys()
+        indices = X.keys()
         for doc in indices:
             X_l.extend(X[doc]["X_{}_{}".format(self.seq_len, self.step)])
         return X_l
@@ -709,21 +776,18 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
         for parameter, value in parameters.items():
             setattr(self, parameter, value)
         return self
-    
+
     def fit_transform(self, X, y=None):
-        return self.fit(X=X,y=y)
+        return self.fit(X=X, y=y)
 
 
-
-
-
-def my_fit_and_score(estimator_pipe,docs_map,scorer,train_idx,test_idx,parameters):
+def my_fit_and_score(estimator_pipe, docs_map, scorer, train_idx, test_idx, parameters):
     print("my_fit_and_score called {}".format(time.time()))
 
     result = {}
-    
-    X_train,y_train = common_utils.get_x_y_by_index(docs_map,train_idx)
-    X_test,y_test = common_utils.get_x_y_by_index(docs_map,test_idx)
+
+    X_train, y_train = common_utils.get_x_y_by_index(docs_map, train_idx)
+    X_test, y_test = common_utils.get_x_y_by_index(docs_map, test_idx)
 
     if parameters is not None:
         # clone after setting parameters in case any parameters
@@ -743,9 +807,6 @@ def my_fit_and_score(estimator_pipe,docs_map,scorer,train_idx,test_idx,parameter
     result["test_scores"] = test_scores
     print("Current CV score {}".format(test_scores))
     return result
-
-
-
 
 
 def select_docs_from_map(docs_map, inidces):
@@ -805,8 +866,9 @@ def my_cross_validate(
 
     return ret
 
+
 class MyVotingClassifier(VotingClassifier):
-    
+
     def __init__(
         self,
         estimators,
@@ -823,9 +885,10 @@ class MyVotingClassifier(VotingClassifier):
         self.n_jobs = n_jobs
         self.flatten_transform = flatten_transform
         self.verbose = verbose
-    
+
     def get_params(self, deep=True):
         return super()._get_params("estimators", deep=deep)
+
     def fit(self, X, y, sample_weight=None):
         self.classes_ = np.unique(flatten(y)).sort()
         self.le_ = LabelEncoder().fit(flatten(y))
@@ -856,10 +919,10 @@ class MyVotingClassifier(VotingClassifier):
                 self.feature_names_in_ = current_est.feature_names_in_
 
         return self
-    
+
     def score(self, X, y, sample_weight=None):
         return common_utils.get_score(flatten(y), self.predict(X), labels=self.classes_)
-    
+
     def predict(self, X):
         check_is_fitted(self)
         if self.voting == "soft":

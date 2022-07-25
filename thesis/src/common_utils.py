@@ -8,6 +8,8 @@ from sklearn.utils.class_weight import compute_class_weight
 from sklearn.metrics import classification_report
 import json
 from  feature_utils import reshape_docs_map_to_seq
+from itertools import islice
+
 def get_doc_idx_from_name(file_name):
     base_name = os.path.basename(file_name)
     return int(base_name.split("_")[0])
@@ -169,10 +171,34 @@ def save_db(db,dir_name,file_name,keep_index=False):
     print("Saving {},  index {}".format(path,keep_index))
     db.to_csv(path,index=keep_index)
 
-def save_json(dic_,dir_name,file_name):
-    dic=dic_.copy()
+def save_json(dic_,dir_name,file_name,convert=True):
+    if isinstance(dic_,dict):
+        dic=dic_.copy()
+        if convert:
+            dic=convert_to_python_types(dic)
+    else:
+        dic=dic_
     path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.json".format(file_name))
-    dic=convert_to_python_types(dic)
     print("Saving {}".format(path))
     with open(path, 'w') as fp:
         json.dump(dic, fp)
+        
+def load_json(dic_,dir_name,file_name,convert=True):
+    path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.json".format(file_name))
+    print("Opened {}".format(path))
+    with open(path, 'r') as fp:
+        read = json.load(fp)
+    return read
+        
+          
+def reshape_as_list(lst1, lst2):
+    last = 0
+    res = []
+    for ele in lst1:
+        res.append(lst2[last : last + len(ele)])
+        last += len(ele)
+          
+    return res
+
+def reshape_to_seq(input,seq_len,step):
+    return [input[i:i+seq_len] for i in range(0,len(input),step)]

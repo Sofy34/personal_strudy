@@ -29,12 +29,10 @@ sys.path.append('./src/')
 # device = torch.device("cuda")
 
 
-def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10):
+def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10, batch_size=1024, dir_name=''):
     cv_db = cv_db_.copy()
     alephbert_tokenizer = BertTokenizerFast.from_pretrained(
         'onlplab/alephbert-base')
-    alephbert_model = BertModel.from_pretrained(
-        'onlplab/alephbert-base', return_dict=False)
     bert_preprocess = BertXYTransformer(tokenizer=alephbert_tokenizer)
 
     for split, indices in cv_splits.items():
@@ -48,11 +46,12 @@ def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10):
         val_tensor_map = bert_preprocess.fit_transform(
             X=X_val)
         start_time = time.time()
-        bert_estimator = BertTrainValidator(pretrained_model=alephbert_model)
+        alephbert_model = BertModel.from_pretrained('onlplab/alephbert-base', return_dict=False)
+        bert_estimator = BertTrainValidator(pretrained_model=alephbert_model,batch_size=batch_size)
         valid_dict = bert_estimator.train_validate(
             train_tensor_map, val_tensor_map, epoch)
         fit_time = time.time()-start_time
-        print("{} split train_validate took {:.2f} sec".format(split, fit_time))
+        print("{} split train_validate took {}".format(split, time.strftime("%H:%M:%S", time.gmtime(fit_time))))
         single_cv_db['bert_group'] = val_tensor_map['groups']
         single_cv_db['bert_split'] = split
 
@@ -68,6 +67,13 @@ def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10):
 
         cv_db = pd.concat([cv_db, single_cv_db],
                           ignore_index=True, axis=0, copy=False)
+        losses={}
+        losses['test']= indices['test'].tolist()
+        losses['train'] = indices['train'].tolist()
+        for key in ['valid_loss','train_loss']:
+            losses[key]=valid_dict[key]
+        common_utils.save_json(losses,dir_name,"split_{}_bert_valid_dict".format(split),convert=False)
+        common_utils.save_db(cv_db,dir_name,'bert_cv_db_all')
     return cv_db
 
 
@@ -452,7 +458,6 @@ def train_validate(model_name, model, optimizer, train_dataloader, val_dataloade
         # evaluate model
         valid_loss, total_preds, raw_preds, total_labels = evaluate(
             model, val_dataloader, cross_entropy)
-        print("train_validate() raw_preds",raw_preds)
 
         # save the best model
         if valid_loss < best_valid_loss:
@@ -465,11 +470,14 @@ def train_validate(model_name, model, optimizer, train_dataloader, val_dataloade
             valid_dict['best_true'] = total_labels
 
         # append training and validation loss
-        valid_dict[epoch]['train_loss'] = train_loss
-        valid_dict[epoch]['valid_loss'] = valid_loss
+        train_losses.append(train_loss)
+        valid_losses.append(valid_loss)
+
 
         print(f'\nTraining Loss: {train_loss:.3f}')
         print(f'\nValidation Loss: {valid_loss:.3f}')
+    valid_dict['train_loss'] = train_losses
+    valid_dict['valid_loss'] = valid_losses
 
     return valid_dict
 

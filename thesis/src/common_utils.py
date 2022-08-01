@@ -9,6 +9,7 @@ from sklearn.metrics import classification_report
 import json
 from  feature_utils import reshape_docs_map_to_seq
 from itertools import islice
+from datetime import datetime
 
 def get_doc_idx_from_name(file_name):
     base_name = os.path.basename(file_name)
@@ -96,14 +97,18 @@ def convert_str_keys_to_int(docs_map):
     return {int(k):v for k,v in docs_map.items()}
 
 def get_score(y_true, y_pred, labels,sample_weight=None):
+    output_dict=get_report(y_true, y_pred, labels,sample_weight)
+    return output_dict['weighted avg']['f1-score']
+    
+def get_report(y_true, y_pred, labels,sample_weight=None):
     output_dict=classification_report(
         y_true=y_true,
         y_pred=y_pred,
         labels=labels,
         output_dict=True)
-    return output_dict['weighted avg']['f1-score']
-    
-    
+    score=output_dict['weighted avg']['f1-score']
+    return score,output_dict
+
 def get_class_weights(y):
     return compute_class_weight(
         class_weight='balanced', classes=np.unique(y), y=y)
@@ -170,6 +175,19 @@ def save_db(db,dir_name,file_name,keep_index=False):
     path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.csv".format(file_name))
     print("Saving {},  index {}".format(path,keep_index))
     db.to_csv(path,index=keep_index)
+    
+def load_db(dir_name,file_name,keep_index=False):
+    path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.csv".format(file_name))
+    print("Opened {},  index {}".format(path,keep_index))
+    return pd.read_csv(path)
+
+
+def save_best_params(params,score,dir_name):
+    now = datetime.now()
+    dt_string = now.strftime("%d.%m_%H:%M")
+    score_str="{:.3f}".format(score).lstrip('0')
+    file_name = "{}_{}_best_params.json".format(score_str,dt_string)
+    save_json(params,dir_name,file_name)
 
 def save_json(dic_,dir_name,file_name,convert=True):
     if isinstance(dic_,dict):
@@ -183,7 +201,7 @@ def save_json(dic_,dir_name,file_name,convert=True):
     with open(path, 'w') as fp:
         json.dump(dic, fp)
         
-def load_json(dic_,dir_name,file_name,convert=True):
+def load_json(dir_name,file_name,convert=True):
     path=os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{}.json".format(file_name))
     print("Opened {}".format(path))
     with open(path, 'r') as fp:

@@ -1,5 +1,6 @@
 from sklearn.linear_model import LogisticRegression
 from feature_utils import get_prediction_report
+from common_utils import get_score, get_report
 from operator import itemgetter
 from sklearn.model_selection import LeavePGroupsOut
 import time
@@ -45,6 +46,8 @@ def flatten_groups(groups, y):
 
 
 def get_report_from_splits(cv_db, prefix):
+    scores = []
+    full_scores={}
     for split in cv_db['{}_split'.format(prefix)].unique():
         y_pred = cv_db[cv_db['{}_split'.format(
             prefix)] == split]['{}_predicted'.format(prefix)].tolist()
@@ -52,6 +55,11 @@ def get_report_from_splits(cv_db, prefix):
             prefix)] == split]['{}_true'.format(prefix)].tolist()
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
+        score,full_score=get_report(y_true, y_pred, np.unique(
+            y_true))
+        scores.append(score)
+        full_scores[split]=full_score
+    return scores,full_scores
 
 
 def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_splits, docs_map=None):

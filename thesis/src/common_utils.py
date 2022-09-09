@@ -45,7 +45,11 @@ def concat_dbs(dir_name,db_name,cols=[],index_name=""):
         db = pd.concat([pd.read_csv(i) for i in df_map.values()],keys=df_map.keys())
     db.reset_index(inplace=True)
     new_idx_name = index_name if len(index_name)>0 else "{}_idx".format(db_name.split('_')[0])
-    db.rename(columns={'level_0':'doc_idx','level_1':new_idx_name},inplace=True)
+    if 'doc_idx' in db.columns:
+        doc_idx_str = 'file_idx'
+    else:
+        doc_idx_str = 'doc_idx'
+    db.rename(columns={'level_0':doc_idx_str,'level_1':new_idx_name},inplace=True)
     return db
 
 def convert_to_list(_dic):

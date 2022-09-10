@@ -147,20 +147,30 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
 
 def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, **crf_params):
     cv_db = cv_db_.copy()
+    if crf_params:
+        print("crf_params passed")
+    else:
+       print("crf_params not passed")
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
-        print("{} split started for {} train sequences...".format(split,len(indices['train'])))
+        print("{} split started for {} train sequences...".format(
+            split, len(indices['train'])))
         X_train, y_train, groups_train = get_X_y_by_doc_indices(
             docs_map, indices['train'], seq_len, step)
         X_test, y_test, groups_test = get_X_y_by_doc_indices(
             docs_map, indices['test'], seq_len, step)
         start_time = time.time()
-        crf = CRF(
-            max_iterations=100,
-            all_possible_transitions=True,
-            algorithm='lbfgs',
-            **crf_params
-        ).fit(X_train, y_train)
+        if crf_params:
+            crf = CRF(
+                max_iterations=100,
+                all_possible_transitions=True,
+                **crf_params)
+        else:
+            crf = CRF(
+                max_iterations=100,
+                all_possible_transitions=True,
+                algorithm='lbfgs')
+        crf.fit(X_train, y_train)
         fit_time = time.time()-start_time
         print("{} split fit of {} samples took {}".format(
             split, len(y_test), time.strftime("%H:%M:%S", time.gmtime(fit_time))))
@@ -346,10 +356,10 @@ def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
             ['doc_idx', 'sent_idx', 'is_nar'], axis=1)
         y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
         groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
-    else: # assume it's dataset TBD add type check
-        X = docs_map.get_x(doc_indices,reshape_name)
-        y = docs_map.get_y(doc_indices,reshape_name)
-        groups = docs_map.get_group(doc_indices,reshape_name)
+    else:  # assume it's dataset TBD add type check
+        X = docs_map.get_x(doc_indices, reshape_name)
+        y = docs_map.get_y(doc_indices, reshape_name)
+        groups = docs_map.get_group(doc_indices, reshape_name)
     return X, y, groups
 
 

@@ -6,6 +6,7 @@ import os
 from scipy import sparse
 import defines
 import numpy as np
+import pickle
 
 sys.path.append('./src/')
 
@@ -54,7 +55,7 @@ class Sentence:
         self.doc_len = doc_len
         self.par_idx = par_idx
         self.x = {}
-        self.y = []
+        self.y = None
 
     def set_features(self, feature_dict=None):
         if type(feature_dict) != dict:
@@ -101,7 +102,6 @@ class Document:
         feature_utils.curr_doc_db = self.doc_db
 
     def pack_doc_features(self):
-        self.load_doc_features()
         for sent_idx in range(self.doc_len):
             par_idx = self.doc_db['merged'].loc[sent_idx, 'par_idx_in_doc']
             sent = Sentence(self.doc_idx, self.doc_len, par_idx, sent_idx)
@@ -201,8 +201,9 @@ class Dataset:
             group.extend(self.doc_map[idx].get_group(reshape_name))
         return group
 
-    def save_to_json(self, file_name):
-        common_utils.save_json(self.doc_map, self.dir_name, file_name, False)
+    def dump_to_file(self, file_name):
+        path=os.path.join(self.path,"dataset_"+file_name+".p")
+        pickle.dump(self, open(path, "wb" ))
 
     def set_tf_params(self, tf_name, stop_list=[]):
         self.tf_params[tf_name] = TfParams(self.dir_name, tf_name, stop_list)

@@ -124,7 +124,7 @@ def tfidf_fit(dir_name,per_word = True, per_lemma = True, analyzer = 'char',n_mi
             corpus = get_all_doc_sentenses(dir_name)
             col_name = 'text'
         data_list = corpus[col_name].tolist()
-        tfidf = TfidfVectorizer(lowercase=False,stop_words=stop_words)
+        tfidf = TfidfVectorizer(lowercase=False,stop_words=stop_words,min_df = min_df)
     else:
         corpus = get_all_doc_sentenses(dir_name)
         data_list = corpus['text'].tolist()

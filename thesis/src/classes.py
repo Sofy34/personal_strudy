@@ -16,8 +16,9 @@ class TfParams:
         self.tf_type = tf_type
         self.stop_list = stop_list
         self.dir_name = dir_name
-        self.suffix = '' if len(stop_list) == 0 else '_stop'
-        self.features = None
+        self.suffix = '_no.stop' if len(
+            stop_list) == 0 else '_stop{}'.format(len(stop_list))
+        self.tf = None
         self.set_tf_params()
 
     def set_tf_params(self):
@@ -36,10 +37,10 @@ class TfParams:
         else:
             print("ERROR: unknown TfIdf type {}".format(self.tf_type))
 
-
     def build_dict(self):
-        self.features = feature_utils.tfidf_build_all_save_per_doc(
+        self.tf = feature_utils.tfidf_build_all_save_per_doc(
             self.dir_name, self.per_word, self.per_lemma, self.analyzer, self.suffix, self.stop_list)
+        self.features = self.tf.get_feature_names_out()
 
 
 class Sentence:
@@ -93,7 +94,7 @@ class Document:
             self.path, "{:02d}_{}.csv".format(self.doc_idx, self.merged_str)))
         self.doc_db['sim_vec'] = pd.read_csv(os.path.join(
             self.path, "{:02d}_sent_sim_vec300_db.csv".format(self.doc_idx)))
-        for tf_key,tf_item in self.tf_params.items():
+        for tf_key, tf_item in self.tf_params.items():
             self.doc_db['tfidf_{}'.format(tf_item.tf_type)] = sparse.load_npz(os.path.join(
                 self.path, "{:02d}_tfidf_{}{}.npz".format(self.doc_idx, tf_item.tf_type, tf_item.suffix)))
         self.doc_len = self.doc_db['merged'].shape[0]
@@ -137,7 +138,7 @@ class Document:
         return y
 
     def get_group(self, reshaped_name=''):
-        return [[self.doc_idx for i in range(len(seq))] for seq in self.reshaped[reshaped_name]]
+        return [self.doc_idx for seq in self.reshaped[reshaped_name]]
 
 
 class Dataset:

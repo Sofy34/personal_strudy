@@ -1,3 +1,10 @@
+import types
+import classes
+import feature_utils
+from sklearn.model_selection import RandomizedSearchCV
+from sklearn.model_selection import GridSearchCV
+import scipy.stats
+from sklearn.metrics import make_scorer
 from sklearn.linear_model import LogisticRegression
 from feature_utils import get_prediction_report
 from common_utils import get_score, get_report
@@ -47,7 +54,7 @@ def flatten_groups(groups, y):
 
 def get_report_from_splits(cv_db, prefix):
     scores = []
-    full_scores={}
+    full_scores = {}
     for split in cv_db['{}_split'.format(prefix)].unique():
         y_pred = cv_db[cv_db['{}_split'.format(
             prefix)] == split]['{}_predicted'.format(prefix)].tolist()
@@ -55,11 +62,11 @@ def get_report_from_splits(cv_db, prefix):
             prefix)] == split]['{}_true'.format(prefix)].tolist()
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
-        score,full_score=get_report(y_true, y_pred, np.unique(
+        score, full_score = get_report(y_true, y_pred, np.unique(
             y_true))
         scores.append(score)
-        full_scores[split]=full_score
-    return scores,full_scores
+        full_scores[split] = full_score
+    return scores, full_scores
 
 
 def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_splits, docs_map=None):
@@ -85,11 +92,11 @@ def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_split
         if(estimator.__class__.__name__ == 'CRF'):
             ens_clf_pred_proba = get_predicted_prob_from_dict(
                 flatten(ens_clf.predict_marginals(X_test)))
-            ens_clf_pred=flatten(ens_clf_pred)
+            ens_clf_pred = flatten(ens_clf_pred)
             y_true = flatten(y_test)
         else:
             ens_clf_pred_proba = ens_clf.predict_proba(X_test)
-            y_true=y_test.tolist()
+            y_true = y_test.tolist()
         single_cv_db['ens_predicted'] = ens_clf_pred
         single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
         single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
@@ -114,25 +121,6 @@ def pack_train_test_for_estimator(prediction_db, indices, cols):
     return X_train, y_train, X_test, y_test
 
 
-# def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
-#     X_flat = []
-#     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['train'])].iterrows():
-#         item = {}
-#         for feature in cols:
-#             item[feature] = row[feature]
-#         X_flat.append(item)
-#     y_train = common_utils.get_y_labels(docs_map, indices['train'])
-#     X_train = common_utils.reshape_as_list(y_train, X_flat)
-#     X_flat = []
-#     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['test'])].iterrows():
-#         item = {}
-#         for feature in cols:
-#             item[feature] = row[feature]
-#         X_flat.append(item)
-#     y_test = common_utils.get_y_labels(docs_map, indices['test'])
-#     X_test = common_utils.reshape_as_list(y_test, X_flat)
-#     return X_train, y_train, X_test, y_test
-
 def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
     X_flat = []
     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['train'])].iterrows():
@@ -140,25 +128,28 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
         for feature in cols:
             item[feature] = row[feature]
         X_flat.append(item)
-    y= prediction_db[prediction_db['crf_group'].isin(indices['train'])]['crf_true']
-    X_train = common_utils.reshape_to_seq(X_flat,8,8)
-    y_train = common_utils.reshape_to_seq(y,8,8)
+    y = prediction_db[prediction_db['crf_group'].isin(
+        indices['train'])]['crf_true']
+    X_train = common_utils.reshape_to_seq(X_flat, 8, 8)
+    y_train = common_utils.reshape_to_seq(y, 8, 8)
     X_flat = []
     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['test'])].iterrows():
         item = {}
         for feature in cols:
             item[feature] = row[feature]
         X_flat.append(item)
-    y= prediction_db[prediction_db['crf_group'].isin(indices['test'])]['crf_true']
-    y_test =  common_utils.reshape_to_seq(y,8,8)
-    X_test =  common_utils.reshape_to_seq(X_flat,8,8)
+    y = prediction_db[prediction_db['crf_group'].isin(
+        indices['test'])]['crf_true']
+    y_test = common_utils.reshape_to_seq(y, 8, 8)
+    X_test = common_utils.reshape_to_seq(X_flat, 8, 8)
     return X_train, y_train, X_test, y_test
+
 
 def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, **crf_params):
     cv_db = cv_db_.copy()
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
-        print("{} split started...".format(split))
+        print("{} split started for {} train sequences...".format(split,len(indices['train'])))
         X_train, y_train, groups_train = get_X_y_by_doc_indices(
             docs_map, indices['train'], seq_len, step)
         X_test, y_test, groups_test = get_X_y_by_doc_indices(
@@ -171,12 +162,14 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
             **crf_params
         ).fit(X_train, y_train)
         fit_time = time.time()-start_time
-        print("{} split fit took {}".format(split, time.strftime("%H:%M:%S", time.gmtime(fit_time))))
+        print("{} split fit of {} samples took {}".format(
+            split, len(y_test), time.strftime("%H:%M:%S", time.gmtime(fit_time))))
         single_cv_db['crf_group'] = flatten_groups(groups_test, y_test)
         single_cv_db['crf_split'] = split
         single_cv_db['crf_predicted'] = flatten(crf.predict(X_test))
         predict_time = time.time() - fit_time - start_time
-        print("{} split predict took {}".format(split, time.strftime("%H:%M:%S", time.gmtime(predict_time))))
+        print("{} split predict took {}".format(
+            split, time.strftime("%H:%M:%S", time.gmtime(predict_time))))
         single_cv_db['crf_true'] = flatten(y_test)
         crf_proba = get_predicted_prob_from_dict(
             flatten(crf.predict_marginals(X_test)))
@@ -336,22 +329,27 @@ def split_test_train_docs(docs_map, test_percent, seq_len, step, seed=None):
 
 
 def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
-    X = []
-    y = []
-    groups = []
+    reshape_name = "{}_{}".format(seq_len, step)
     if isinstance(docs_map, dict):
+        X = []
+        y = []
+        groups = []
         for idx in doc_indices:
-            X.extend(docs_map[idx]["X_{}_{}".format(seq_len, step)])
-            y.extend(docs_map[idx]["y_{}_{}".format(seq_len, step)])
+            X.extend(docs_map[idx]["X_{}".format(reshape_name)])
+            y.extend(docs_map[idx]["y_{}".format(reshape_name)])
             groups.extend(
                 [idx for i in range(
-                    len(docs_map[idx]["y_{}_{}".format(seq_len, step)]))]
+                    len(docs_map[idx]["y_{}".format(reshape_name)]))]
             )
     elif isinstance(docs_map, pd.DataFrame):
         X = docs_map[docs_map['doc_idx'].isin(doc_indices)].drop(
             ['doc_idx', 'sent_idx', 'is_nar'], axis=1)
         y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
         groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
+    else: # assume it's dataset TBD add type check
+        X = docs_map.get_x(doc_indices,reshape_name)
+        y = docs_map.get_y(doc_indices,reshape_name)
+        groups = docs_map.get_group(doc_indices,reshape_name)
     return X, y, groups
 
 
@@ -759,6 +757,11 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
         print('{}>>>>>>init() called'.format(self.__class__.__name__))
         self._estimator_type = "classifier"
         self.crf_model = crf_model
+        self.labels = ['not_nar', 'is_nar']
+        self.f1_scorer = make_scorer(metrics.flat_f1_score,
+                                     average='weighted', labels=self.labels)
+        self.rs_index = -1
+        self.rs = {}
 
     def fit(self, X, y):
         self.classes_ = np.unique(flatten(y))
@@ -787,6 +790,46 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
 
     def fit_transform(self, X, y=None):
         return self.fit(X=X, y=y)
+
+    def set_search_params(self, params_space, cv, n_iter, random_state):
+        self.params_space = params_space
+        self.cv = cv
+        self.n_iter = n_iter
+        self.random_state = random_state
+
+    def find_best_params(self, X, y, groups, params_space={
+        'c1': scipy.stats.expon(scale=0.5),
+        'c2': scipy.stats.expon(scale=0.05),
+        'algorithm': ['lbfgs', 'l2sgd', 'ap', 'pa', 'arow'],
+        'min_freq': np.arange(1, 11, 2)
+    }, cv=None, n_iter=50, random_state=4):
+        self.rs_index += 1
+        self.set_search_params(params_space, cv, n_iter, random_state)
+        self.rs[self.rs_index] = RandomizedSearchCV(self.crf_model,
+                                                    param_distributions=self.params_space,
+                                                    cv=self.cv,
+                                                    n_iter=self.n_iter,
+                                                    n_jobs=-1,
+                                                    scoring=self.f1_scorer,
+                                                    random_state=self.random_state,
+                                                    verbose=1,
+                                                    )
+        self.rs[self.rs_index].fit(X=X, y=y, groups=groups)
+        self.print_rs_result(self.rs_index)
+
+    def print_rs_result(self, iteration):
+        print('best params:', self.rs[iteration].best_params_)
+        print('best CV score:', self.rs[iteration].best_score_)
+        print('model size: {:0.2f}M'.format(
+            self.rs[iteration].best_estimator_.size_ / 1000000))
+
+    def predict_on_best_params(self, iteration, X, y):
+        if iteration in self.rs.keys():
+            y_pred = self.rs[iteration].best_estimator_.predict(X)
+            feature_utils.get_prediction_report(flatten(y), flatten(
+                y_pred), self.rs[iteration].best_estimator_.classes_)
+        else:
+            print("ERROR: best parameters for {} was not found yet".format(iteration))
 
 
 def my_fit_and_score(estimator_pipe, docs_map, scorer, train_idx, test_idx, parameters):

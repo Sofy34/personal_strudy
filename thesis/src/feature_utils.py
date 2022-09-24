@@ -135,16 +135,17 @@ def tfidf_fit(dir_name,per_word = True, per_lemma = True, analyzer = 'char',n_mi
         )
     return tfidf.fit(data_list)
 
-def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyzer = 'char',tf_suffix='',stop_words=[]):
+def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyzer = 'char',tf_suffix='',stop_words=[],doc_indices=[]):
     tf = tfidf_fit(dir_name=dir_name,per_word=per_word,per_lemma=per_lemma,analyzer=analyzer,stop_words=stop_words)
     tf_params = tf.get_params()
     tf_string = tf_params['analyzer'] if per_lemma==False else "lemma"
     print("TfIdf {} vocab size {}".format(tf_string,len(tf.vocabulary_)))
     features = tf.get_feature_names()
     sample_features(features)
-    sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name, "*_sent_lemma_db.csv"))
-    for i,doc_name in enumerate(sent_lemma_db_list):
-        doc_prefix = common_utils.get_doc_idx_from_name(doc_name)
+    if not doc_indices:
+        sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name, "*_sent_lemma_db.csv"))
+        doc_indices=[common_utils.get_doc_idx_from_name(doc_name) for doc_name in sent_lemma_db_list]
+    for i,doc_prefix in enumerate(doc_indices):
         X = tfidf_transform_doc(dir_name,doc_prefix,tf,per_lemma)
         sparse.save_npz(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name,"{:02d}_tfidf_{}{}.npz".format(doc_prefix,tf_string,tf_suffix)), X)
         print("{}".format(i),end=" ")

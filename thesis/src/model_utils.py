@@ -150,14 +150,14 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
     if crf_params:
         print("crf_params passed")
     else:
-       print("crf_params not passed")
+        print("crf_params not passed")
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
         print("{} split started for {} train sequences...".format(
             split, len(indices['train'])))
-        X_train, y_train, groups_train = get_X_y_by_doc_indices(
+        X_train, y_train, _, _ = get_X_y_by_doc_indices(
             docs_map, indices['train'], seq_len, step)
-        X_test, y_test, groups_test = get_X_y_by_doc_indices(
+        X_test, y_test, groups_test, par_test = get_X_y_by_doc_indices(
             docs_map, indices['test'], seq_len, step)
         start_time = time.time()
         if crf_params:
@@ -175,6 +175,7 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
         print("{} split fit of {} samples took {}".format(
             split, len(y_test), time.strftime("%H:%M:%S", time.gmtime(fit_time))))
         single_cv_db['crf_group'] = flatten_groups(groups_test, y_test)
+        single_cv_db['crf_par'] = flatten_groups(par_test, y_test)
         single_cv_db['crf_split'] = split
         single_cv_db['crf_predicted'] = flatten(crf.predict(X_test))
         predict_time = time.time() - fit_time - start_time
@@ -339,6 +340,10 @@ def split_test_train_docs(docs_map, test_percent, seq_len, step, seed=None):
 
 
 def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
+    X = []
+    y = []
+    groups = []
+    par = []
     reshape_name = "{}_{}".format(seq_len, step)
     if isinstance(docs_map, dict):
         X = []
@@ -360,7 +365,8 @@ def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
         X = docs_map.get_x(doc_indices, reshape_name)
         y = docs_map.get_y(doc_indices, reshape_name)
         groups = docs_map.get_group(doc_indices, reshape_name)
-    return X, y, groups
+        par = docs_map.get_paragraph(doc_indices, reshape_name)
+    return X, y, groups, par
 
 
 def get_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
@@ -613,24 +619,33 @@ def get_test_train_splits(doc_indices, test_doc_num=10, n_splits=3, seed=42):
 
 
 class GroupSplitFold():
-    def __init__(self, n_splits=3, n_groups=1):
+    def __init__(self, n_splits=3, n_groups=1, prepared_splits=[]):
         self.n_splits = n_splits
         self.n_groups = n_groups
+        self.splits = prepared_splits
 
-    def split(self, X, y=None, groups=None, seed=None):
-        doc_indices = set(groups)
-        total_test_idx = set(random.sample(
-            doc_indices, self.n_groups*self.n_splits))
-        if seed:
-            random.seed(seed)
-        for i in range(self.n_splits):
-            test_docs = set(random.sample(total_test_idx, self.n_groups))
-            total_test_idx = total_test_idx - test_docs
-            train_docs = doc_indices - test_docs
-            train_idx = [idx for idx, j in enumerate(
-                groups) if j in train_docs]
-            test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
-            yield train_idx, test_idx
+    def yeld_prepared_splits(self):
+        for split in self.splits:
+            yield split.train, split.test
+
+    def split(self, X=None, y=None, groups=None, seed=None):
+        if len(self.splits) > 0:
+            yield from  self.yeld_prepared_splits()
+        else:
+            doc_indices = set(groups)
+            total_test_idx = set(random.sample(
+                doc_indices, self.n_groups*self.n_splits))
+            if seed:
+                random.seed(seed)
+            for i in range(self.n_splits):
+                test_docs = set(random.sample(total_test_idx, self.n_groups))
+                total_test_idx = total_test_idx - test_docs
+                train_docs = doc_indices - test_docs
+                train_idx = [idx for idx, j in enumerate(
+                    groups) if j in train_docs]
+                test_idx = [idx for idx, j in enumerate(
+                    groups) if j in test_docs]
+                yield train_idx, test_idx
 
     def get_n_splits(self, X, y, groups=None):
         return self.n_splits
@@ -763,13 +778,16 @@ class CrfTransformer(TransformerMixin, BaseEstimator):
 
 class CrfClassifier(ClassifierMixin, BaseEstimator):
 
-    def __init__(self, crf_model=None):
+    def __init__(self, crf_model=None, scorer=None):
         print('{}>>>>>>init() called'.format(self.__class__.__name__))
         self._estimator_type = "classifier"
         self.crf_model = crf_model
         self.labels = ['not_nar', 'is_nar']
-        self.f1_scorer = make_scorer(metrics.flat_f1_score,
-                                     average='weighted', labels=self.labels)
+        if scorer:
+            self.f1_scorer = make_scorer(scorer)
+        else:
+            self.f1_scorer = make_scorer(metrics.flat_f1_score,
+                                         average='weighted', labels=self.labels)
         self.rs_index = -1
         self.rs = {}
 
@@ -801,20 +819,15 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
     def fit_transform(self, X, y=None):
         return self.fit(X=X, y=y)
 
-    def set_search_params(self, params_space, cv, n_iter, random_state):
+    def set_search_params(self, cv, n_iter, random_state,  **params_space):
         self.params_space = params_space
         self.cv = cv
         self.n_iter = n_iter
         self.random_state = random_state
 
-    def find_best_params(self, X, y, groups, params_space={
-        'c1': scipy.stats.expon(scale=0.5),
-        'c2': scipy.stats.expon(scale=0.05),
-        'algorithm': ['lbfgs', 'l2sgd', 'ap', 'pa', 'arow'],
-        'min_freq': np.arange(1, 11, 2)
-    }, cv=None, n_iter=50, random_state=4):
+    def find_best_params(self, X, y, groups, cv=None, n_iter=50, random_state=4, **params_space):
         self.rs_index += 1
-        self.set_search_params(params_space, cv, n_iter, random_state)
+        self.set_search_params(cv, n_iter, random_state, **params_space)
         self.rs[self.rs_index] = RandomizedSearchCV(self.crf_model,
                                                     param_distributions=self.params_space,
                                                     cv=self.cv,
@@ -822,7 +835,7 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
                                                     n_jobs=-1,
                                                     scoring=self.f1_scorer,
                                                     random_state=self.random_state,
-                                                    verbose=1,
+                                                    verbose=2,
                                                     )
         self.rs[self.rs_index].fit(X=X, y=y, groups=groups)
         self.print_rs_result(self.rs_index)

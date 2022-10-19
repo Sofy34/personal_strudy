@@ -1,3 +1,6 @@
+import time
+import segeval as se
+import model_utils
 from sklearn_crfsuite.utils import flatten
 from sklearn import metrics
 import feature_utils
@@ -9,6 +12,9 @@ from scipy import sparse
 import defines
 import numpy as np
 import pickle
+from sklearn.metrics import make_scorer,accuracy_score,balanced_accuracy_score,precision_score,recall_score,f1_score
+from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
+
 sys.path.append('./src/')
 
 
@@ -90,6 +96,9 @@ class Sentence:
     def set_pred_y(self, pred_y):
         self.pred_y = pred_y
 
+    def get_pred_y(self):
+        return self.pred_y
+
     def print(self, label="true"):
         if label == "pred" and self.pred_y == None:
             raise Exception("Can't print predicted since label is not given")
@@ -107,6 +116,7 @@ class Paragraph():
         self.sent_list = []
         self.y = 'not_nar'
         self.par_len = 0
+        self.nar_sent_count = 0
         self.par_type = par_type
 
     def set_y(self, y):
@@ -115,6 +125,7 @@ class Paragraph():
     def add_sent(self, sent):
         self.sent_list.append(sent)
         if sent.get_y() == 'is_nar':
+            self.nar_sent_count += 1
             # if at least one sentence is narrative => paragraph is narrative
             self.set_y('is_nar')
         self.par_len += 1
@@ -124,7 +135,7 @@ class Paragraph():
         for sent in self.sent_list:
             text += sent.print(label)
         return text
-    
+
     def get_par_type(self):
         return self.par_type
 
@@ -145,8 +156,9 @@ class Document:
         self.neighbor_radius = neighbor_radius
         self.doc_db = {}
         self.doc_len = 0  # updated after features are loaded
-        self.par_list = {}
+        self.par_map = {}
         self.print_df = pd.DataFrame()
+        self.colored_ind_df = pd.DataFrame()
         self.nar_df = pd.DataFrame()
         self.nar_map = {}
 
@@ -233,12 +245,12 @@ class Document:
         return par
 
     def pack_sent_per_paragraph(self):
-        self.par_list = {}
+        self.par_map = {}
         for sent in self.sent_list:
-            if not sent.par_idx in self.par_list:
-                self.par_list[sent.par_idx] = Paragraph(
+            if not sent.par_idx in self.par_map:
+                self.par_map[sent.par_idx] = Paragraph(
                     self.doc_idx, sent.par_idx, sent.par_type)
-            self.par_list[sent.par_idx].add_sent(sent)
+            self.par_map[sent.par_idx].add_sent(sent)
 
     def set_pred_y(self, pred_y):
         if len(pred_y) != len(self.sent_list):
@@ -247,16 +259,38 @@ class Document:
         for i, sent in enumerate(self.sent_list):
             sent.set_pred_y(pred_y[i])
 
+    def get_pred_y(self, reshaped_name=''):
+        y = []
+        if not reshaped_name:
+            y = [sent.get_pred_y() for sent in self.sent_list]
+        else:
+            for sent_seq in self.reshaped[reshaped_name]:
+                y.append([sent_seq[i].get_pred_y()
+                         for i in range(len(sent_seq))])
+        return y
+
     def print(self, label="true"):
-        for i, par in self.par_list.items():
+        for i, par in self.par_map.items():
             self.print_df.loc[i, label] = par.print(label)
             self.print_df.loc[i, "type"] = par.get_par_type()
         self.write_html(label)
         return self.print_df
 
-    def write_html(self, label):
-        html = self.print_df.to_html(escape=False, justify="center")
-        html = r'<link rel="stylesheet" type="text/css" href="df_style.css" /><br>' + html
+    def print_colored_indices(self, y_pred=None):
+        if y_pred is None and self.sent_list[0].get_pred_y() is None:
+            raise Exception("y predicted was not set!")
+        self.colored_ind_df['true'] = model_utils.get_colored_from_list(
+            self.get_y(), "is_nar")
+        self.colored_ind_df['pred'] = model_utils.get_colored_from_list(
+            self.get_pred_y(), "is_nar")
+        self.write_html("colored_indices")
+        return self.print_df
+
+    def write_html(self, label, index=True, style="df_style"):
+        html = self.print_df.to_html(
+            escape=False, justify="center", index=index)
+        html = r'<link rel="stylesheet" type="text/css" href="{}.css" /><br>'.format(
+            style) + html
         # write html to file
         print_df_path = os.path.join(
             self.path, "{:02}_print_{}.html".format(self.doc_idx, label)
@@ -283,8 +317,8 @@ class Dataset:
         else:
             self.doc_indices = doc_indices
         self.tf_params = {}
-        self.nar_df=pd.DataFrame()
-        self.print_df=pd.DataFrame()
+        self.nar_df = pd.DataFrame()
+        self.print_df = pd.DataFrame()
         print("{} init called".format(self.__class__.__name__))
 
     def create_tfidf(self):
@@ -349,17 +383,22 @@ class Dataset:
 
     def print(self, label="true"):
         for idx in self.doc_indices:
-            doc_df=self.doc_map[idx].print(label)
-            doc_df['doc_idx']=idx
-            self.print_df=pd.concat([self.print_df,doc_df],ignore_index=False, axis=0,copy=False)
+            doc_df = self.doc_map[idx].print(label)
+            doc_df['doc_idx'] = idx
+            self.print_df = pd.concat(
+                [self.print_df, doc_df], ignore_index=False, axis=0, copy=False)
         return self.print_df
 
     def get_nar_df(self):
         for idx in self.doc_indices:
-            doc_df=self.doc_map[idx].get_nar_df()
-            doc_df['doc_idx']=idx
-            self.nar_df=pd.concat([self.nar_df,doc_df],ignore_index=False, axis=0,copy=False)
+            doc_df = self.doc_map[idx].get_nar_df()
+            doc_df['doc_idx'] = idx
+            self.nar_df = pd.concat(
+                [self.nar_df, doc_df], ignore_index=False, axis=0, copy=False)
         return self.nar_df
+
+    def copy_attr(self, other):
+        self.__dict__ = other.__dict__.copy()
 
 
 class WindowDiff():
@@ -468,7 +507,7 @@ class Split:
         self.test = test
 
 
-class MyScorer:
+class MyMixedScorer:
     def __init__(self, window_size=3, weights=[0.5, 0.5]):
         print("{} init called".format(self.__class__.__name__))
         self.win_f1 = WinPR(window_size=window_size)
@@ -481,3 +520,119 @@ class MyScorer:
         mixed_score = np.average(
             a=[win_score, label_score], weights=self.weights)
         return mixed_score
+
+
+class MySegEval():
+    def __init__(self, main_score='f1', n_t=2):
+        self.main_score = main_score
+        self.n_t = n_t
+        self.scores = {}
+        print("{} init called".format(self.__class__.__name__))
+
+    def get_segment_list(self, y):
+        df = pd.DataFrame(y, columns=['is_nar'])
+        seg_size = pd.DataFrame()
+        seg_size['size'] = df.groupby(
+            (df['is_nar'].shift() != df['is_nar']).cumsum()).size()
+        seg_size['is_nar'] = df.groupby((df['is_nar'].shift() != df['is_nar']).cumsum())[
+            'is_nar'].apply(common_utils.get_single_unique)
+        return seg_size['size'].tolist()
+
+    def score_func(self, y_true, y_pred):
+        scores = self.get_scores(y_true, y_pred)
+        return scores[self.main_score]
+
+    def flatten_y(self, y):
+        if isinstance(y[0], list):
+            y = flatten(y)
+        return y
+
+    def get_scores(self, y_true, y_pred):
+        labels = np.unique(y_true)
+        y_true = self.get_segment_list(self.flatten_y(y_true))
+        y_pred = self.get_segment_list(self.flatten_y(y_pred))
+        conf_matrix = se.boundary_confusion_matrix(
+            y_true, y_pred, n_t=self.n_t)
+        self.scores['f1'] = se.fmeasure(conf_matrix)
+        self.scores['recall'] = se.recall(conf_matrix)
+        self.scores['precision'] = se.recall(conf_matrix)
+        self.scores['b_sim'] = se.boundary_similarity(
+            y_true, y_pred, n_t=self.n_t)
+        self.scores['s_sim'] = se.segmentation_similarity(
+            y_true, y_pred, n_t=self.n_t)
+        self.scores['b_stat'] = se.boundary_statistics(
+            y_true, y_pred, n_t=self.n_t)
+        return self.scores
+
+
+class MyReport():
+
+    def __init__(self):
+        print("{} init called".format(self.__class__.__name__))
+
+    def get_avg_scores(self, scr_dict, labels=['not_nar', 'nar']):
+        if not isinstance(scr_dict, dict):
+            raise Exception("Expect to get dictionary as input")
+
+        avg = {}
+
+        for l in labels:
+            avg[l] = {}
+        avg['weighted avg'] = {}
+        for label in avg.keys():
+            avg[label] = {}
+            avg[label]['recall'] = []
+            avg[label]['prec'] = []
+            avg[label]['f1'] = []
+
+            for key, val in scr_dict.items():
+                avg[label]['f1'].append(val[label]['f1-score'])
+                avg[label]['recall'].append(val[label]['recall'])
+                avg[label]['prec'].append(val[label]['precision'])
+
+        for label, item in avg.items():
+            avg[label]['avg'] = {}
+            for k, v in item.items():
+                if k != 'avg':
+                    avg[label]['avg'][k] = np.mean(v)
+        return avg
+
+
+class MyScorer():
+
+    def __init__(self):
+        print("{} init called".format(self.__class__.__name__))
+        self.custom_scorer = {'accuracy': make_scorer(accuracy_score),
+                              'balanced_accuracy': make_scorer(balanced_accuracy_score),
+                              'precision': make_scorer(precision_score, average='weighted'),
+                              'recall': make_scorer(recall_score, average='weighted'),
+                              'f1': make_scorer(f1_score, average='weighted'),
+                              }
+        self.scorer_names=list(self.custom_scorer.keys())
+        self.scores_df=pd.DataFrame()
+
+  
+    def add_score(self,scores, regressorName, prefix):
+        for name in self.scorer_names:
+            self.scores_df.loc[regressorName + '_' + prefix, name] = scores["test_"+name].mean()
+
+    
+    def get_cross_val_score(self,estimator,X_train,y_train,groups,prefix="",cv=10):
+        name = estimator.__class__.__name__
+        start_time = time.time()
+        print('*********' + name + '*********')
+        full_scores = cross_validate(
+            estimator,
+            X_train, 
+            y_train, 
+            groups=groups,
+            cv=cv,
+            scoring=self.custom_scorer,
+            n_jobs = -1
+        )
+        self.add_score(full_scores,name,prefix)
+        end_time = time.time()-start_time
+        print("{} took  {}".format(name, time.strftime("%H:%M:%S", time.gmtime(end_time))))
+ 
+    
+    

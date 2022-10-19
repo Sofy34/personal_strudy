@@ -7,7 +7,6 @@ import scipy.stats
 from sklearn.metrics import make_scorer
 from sklearn.linear_model import LogisticRegression
 from feature_utils import get_prediction_report
-from common_utils import get_score, get_report
 from operator import itemgetter
 from sklearn.model_selection import LeavePGroupsOut
 import time
@@ -62,8 +61,8 @@ def get_report_from_splits(cv_db, prefix):
             prefix)] == split]['{}_true'.format(prefix)].tolist()
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
-        score, full_score = get_report(y_true, y_pred, np.unique(
-            y_true))
+        score, full_score = common_utils.get_report(y_true, y_pred, np.unique(
+            y_true), n_t)
         scores.append(score)
         full_scores[split] = full_score
     return scores, full_scores
@@ -145,8 +144,8 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
     return X_train, y_train, X_test, y_test
 
 
-def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, **crf_params):
-    cv_db = cv_db_.copy()
+def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_params):
+    cv_db=pd.DataFrame()
     if crf_params:
         print("crf_params passed")
     else:
@@ -175,7 +174,7 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
         print("{} split fit of {} samples took {}".format(
             split, len(y_test), time.strftime("%H:%M:%S", time.gmtime(fit_time))))
         single_cv_db['crf_group'] = flatten_groups(groups_test, y_test)
-        single_cv_db['crf_par'] = flatten_groups(par_test, y_test)
+        single_cv_db['crf_par'] = flatten(par_test)
         single_cv_db['crf_split'] = split
         single_cv_db['crf_predicted'] = flatten(crf.predict(X_test))
         predict_time = time.time() - fit_time - start_time
@@ -186,11 +185,11 @@ def prepared_cross_validate_crf(cv_db_, docs_map, cv_splits, seq_len=3, step=3, 
             flatten(crf.predict_marginals(X_test)))
         single_cv_db['crf_proba_0'] = crf_proba[:, 0]
         single_cv_db['crf_proba_1'] = crf_proba[:, 1]
+        single_cv_db['crf_sent_idx'] = single_cv_db.index
 
         cv_db = pd.concat([cv_db, single_cv_db],
                           ignore_index=True, axis=0, copy=False)
     return cv_db
-
 
 def get_info_on_pred(y_pred, y_pred_proba, y_test, groups_test):
     pred_df = pd.DataFrame()
@@ -487,6 +486,26 @@ def print_error_par_text(dir_name, indices, pred_info_df, print_proba):
     text_file.close()
 
 
+def get_colored_from_list(_list, true_label=1, html=True):
+    text = ""
+    corr_style = "<span class='corrStyle'>"
+    end = "</span>"
+    if html:
+        for idx,val in enumerate(_list):
+            if val == true_label:
+                char=corr_style+"{:03}|".format(idx)+end
+            else:
+                char="{:03}|".format(idx)
+            text+=char
+    else:       
+        for idx,val in enumerate(_list):
+            if val == true_label:
+                char=colored("{:03}|".format(idx),on_color="on_yellow")
+            else:
+                char="{:03}|".format(idx)
+            text+=char
+    return text
+
 def print_labeled_paragraph(par_corpus):
 
     cprint("Correct labeling:", attrs=["bold"])
@@ -652,20 +671,31 @@ class GroupSplitFold():
 
 
 class ByDocFold():
-    def __init__(self, n_splits=3, n_groups=1):
+    def __init__(self, n_splits=3, n_groups=1,prepared_splits=[]):
         self.n_splits = n_splits
         self.n_groups = n_groups
+        self.splits=prepared_splits
 
-    def split(self, X, y=None, groups=None):
-        doc_indices = set(groups)
-
-        for i in range(self.n_splits):
-            test_docs = set(random.sample(doc_indices, self.n_groups))
-            train_docs = doc_indices - test_docs
+    def yeld_prepared_splits(self,X,y,groups):
+        for split in self.splits:
             train_idx = [idx for idx, j in enumerate(
-                groups) if j in train_docs]
-            test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
+            groups) if j in split.train]
+            test_idx = [idx for idx, j in enumerate(groups) if j in split.test]
             yield train_idx, test_idx
+    
+    def split(self, X, y=None, groups=None):
+        if len(self.splits) > 0:
+            yield from  self.yeld_prepared_splits(X,y,groups)
+        else:
+            doc_indices = set(groups)
+
+            for i in range(self.n_splits):
+                test_docs = set(random.sample(doc_indices, self.n_groups))
+                train_docs = doc_indices - test_docs
+                train_idx = [idx for idx, j in enumerate(
+                    groups) if j in train_docs]
+                test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
+                yield train_idx, test_idx
 
     def get_n_splits(self, X, y, groups=None):
         return self.n_splits

@@ -1,3 +1,4 @@
+import classes
 import pickle
 import os
 import pandas as pd
@@ -123,12 +124,15 @@ def get_score(y_true, y_pred, labels, sample_weight=None):
     return output_dict['weighted avg']['f1-score']
 
 
-def get_report(y_true, y_pred, labels, sample_weight=None):
+def get_report(y_true, y_pred, labels, sample_weight=None,n_t=2):
     output_dict = classification_report(
         y_true=y_true,
         y_pred=y_pred,
         labels=labels,
         output_dict=True)
+    my_se=classes.MySegEval(n_t=n_t)
+    output_dict['segeval']=my_se.get_scores(y_true,y_pred)
+    del output_dict['segeval']['b_stat'] # tbd temporary remove statistic form report to shorten prints
     score = output_dict['weighted avg']['f1-score']
     return score, output_dict
 
@@ -276,3 +280,11 @@ def dump_to_file(_object, file_name):
     path = os.path.join(os.getcwd(), defines.PATH_TO_DFS,
                         file_name+".p")
     pickle.dump(_object, open(path, "wb"))
+
+def load_pickle(dir_name, file_name):
+    path = os.path.join(os.getcwd(), defines.PATH_TO_DFS,dir_name, 
+                        file_name+".p")
+    return pickle.load(open(path, "rb"))
+
+def get_single_unique(group):
+    return group.unique()[0]

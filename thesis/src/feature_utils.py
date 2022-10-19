@@ -1,3 +1,6 @@
+import sys
+sys.path.append('./src/')
+import classes
 import numpy as np
 import pandas as pd
 import defines
@@ -39,9 +42,9 @@ regressors_type = [
     PassiveAggressiveClassifier(random_state=0),
     Perceptron(random_state=0),
     RidgeClassifier(random_state=0),
-    RidgeClassifierCV(),
+    RidgeClassifierCV(), #eliminted - takes too long and poor performance
     SGDClassifier(random_state=0),
-    SVC(random_state=0),
+    SVC(random_state=0), #slow+poor performance
     DecisionTreeClassifier(random_state=0)
 ]
 
@@ -142,7 +145,7 @@ def tfidf_build_all_save_per_doc(dir_name,per_word = True,per_lemma=True,analyze
     print("TfIdf {} vocab size {}".format(tf_string,len(tf.vocabulary_)))
     features = tf.get_feature_names()
     sample_features(features)
-    if not doc_indices:
+    if len(doc_indices)==0:
         sent_lemma_db_list = glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS,dir_name, "*_sent_lemma_db.csv"))
         doc_indices=[common_utils.get_doc_idx_from_name(doc_name) for doc_name in sent_lemma_db_list]
     for i,doc_prefix in enumerate(doc_indices):
@@ -768,10 +771,11 @@ def get_cross_val_score(estimator,X_train,y_train,prefix="",sampler=None):
             X_train, 
             y_train, 
             cv=10,
-            scoring=('roc_auc', 'average_precision', 'recall', 'f1'),
+            scoring=scoring,
             n_jobs = -1
         )
         add_score(full_scores, estimator.__class__.__name__,prefix)
+
 
 def save_estimator(estimator):
     global regressors_instance
@@ -785,10 +789,11 @@ def add_score(scores, regressorName, dataType):
     scores_df.loc[regressorName + '_' + dataType, 'average_precision'] = scores['test_average_precision'].mean()
 
 
-def cross_val_all_regerssors(X_train,y_train,feature_set):
-    global scores_df
+def cross_val_all_regerssors(my_df,X_train,y_train,groups,feature_set,cv=10):
+    myScorer = classes.MyScorer()
     for regr in regressors_type:
-        get_cross_val_score(regr, X_train, y_train,feature_set)
+        myScorer.get_cross_val_score(regr, X_train, y_train,groups,feature_set,cv=cv)
+    return pd.concat([myScorer.scores_df,my_df])
 
 def fit_predict_all_regressors(X_train,y_train,X_test):
     global regressors_type

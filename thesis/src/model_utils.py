@@ -1,3 +1,4 @@
+from collections import Counter
 import types
 import classes
 import feature_utils
@@ -55,17 +56,17 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
     scores = []
     par_scores = []
     full_scores = {}
-    par_full_scores ={}
+    par_full_scores = {}
     for split in cv_db['{}_split'.format(prefix)].unique():
-        split_data=cv_db[cv_db['{}_split'.format(prefix)] == split]
+        split_data = cv_db[cv_db['{}_split'.format(prefix)] == split]
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
         score, full_score = common_utils.get_report(y_true, y_pred, np.unique(
             y_true), n_t)
-        par_y_true,par_y_pred=extract_y_paragraph(split_data, prefix)
-        par_score, par_full_score = common_utils.get_report(par_y_true,par_y_pred, np.unique(
+        par_y_true, par_y_pred = extract_y_paragraph(split_data, prefix)
+        par_score, par_full_score = common_utils.get_report(par_y_true, par_y_pred, np.unique(
             par_y_true), n_t)
         scores.append(score)
         par_scores.append(par_score)
@@ -74,17 +75,19 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
     return scores, full_scores, par_scores, par_full_scores
 
 
+def par_contains_nar(group, label, prefix):
+    return any(group['{}_{}'.format(prefix, label)].str.contains('is_nar'))
 
-def par_contains_nar(group,label,prefix):
-    return any(group['{}_{}'.format(prefix,label)].str.contains('is_nar'))
 
-def extract_y_paragraph(cv_db,prefix):
-    db_par=pd.DataFrame()
-    doc_col='{}_group'.format(prefix)
-    par_col='{}_par'.format(prefix)
-    db_par['par_true']=cv_db.groupby([doc_col,par_col]).apply(par_contains_nar,label='true',prefix=prefix)
-    db_par['par_predicted']=cv_db.groupby([doc_col,par_col]).apply(par_contains_nar,label='predicted',prefix=prefix)
-    return db_par['par_true'].tolist(),db_par['par_predicted'].tolist()
+def extract_y_paragraph(cv_db, prefix):
+    db_par = pd.DataFrame()
+    doc_col = '{}_group'.format(prefix)
+    par_col = '{}_par'.format(prefix)
+    db_par['par_true'] = cv_db.groupby([doc_col, par_col]).apply(
+        par_contains_nar, label='true', prefix=prefix)
+    db_par['par_predicted'] = cv_db.groupby([doc_col, par_col]).apply(
+        par_contains_nar, label='predicted', prefix=prefix)
+    return db_par['par_true'].tolist(), db_par['par_predicted'].tolist()
 
 
 def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_splits, docs_map=None):
@@ -164,7 +167,7 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
 
 
 def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_params):
-    cv_db=pd.DataFrame()
+    cv_db = pd.DataFrame()
     if crf_params:
         print("crf_params passed")
     else:
@@ -209,6 +212,7 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
         cv_db = pd.concat([cv_db, single_cv_db],
                           ignore_index=True, axis=0, copy=False)
     return cv_db
+
 
 def get_info_on_pred(y_pred, y_pred_proba, y_test, groups_test):
     pred_df = pd.DataFrame()
@@ -510,20 +514,21 @@ def get_colored_from_list(_list, true_label=1, html=True):
     corr_style = "<span class='corrStyle'>"
     end = "</span>"
     if html:
-        for idx,val in enumerate(_list):
+        for idx, val in enumerate(_list):
             if val == true_label:
-                char=corr_style+"{:03}|".format(idx)+end
+                char = corr_style+"{:03}|".format(idx)+end
             else:
-                char="{:03}|".format(idx)
-            text+=char
-    else:       
-        for idx,val in enumerate(_list):
+                char = "{:03}|".format(idx)
+            text += char
+    else:
+        for idx, val in enumerate(_list):
             if val == true_label:
-                char=colored("{:03}|".format(idx),on_color="on_yellow")
+                char = colored("{:03}|".format(idx), on_color="on_yellow")
             else:
-                char="{:03}|".format(idx)
-            text+=char
+                char = "{:03}|".format(idx)
+            text += char
     return text
+
 
 def print_labeled_paragraph(par_corpus):
 
@@ -668,7 +673,7 @@ class GroupSplitFold():
 
     def split(self, X=None, y=None, groups=None, seed=None):
         if len(self.splits) > 0:
-            yield from  self.yeld_prepared_splits()
+            yield from self.yeld_prepared_splits()
         else:
             doc_indices = set(groups)
             total_test_idx = set(random.sample(
@@ -690,21 +695,21 @@ class GroupSplitFold():
 
 
 class ByDocFold():
-    def __init__(self, n_splits=3, n_groups=1,prepared_splits=[]):
+    def __init__(self, n_splits=3, n_groups=1, prepared_splits=[]):
         self.n_splits = n_splits
         self.n_groups = n_groups
-        self.splits=prepared_splits
+        self.splits = prepared_splits
 
-    def yeld_prepared_splits(self,X,y,groups):
+    def yeld_prepared_splits(self, X, y, groups):
         for split in self.splits:
             train_idx = [idx for idx, j in enumerate(
-            groups) if j in split.train]
+                groups) if j in split.train]
             test_idx = [idx for idx, j in enumerate(groups) if j in split.test]
             yield train_idx, test_idx
-    
+
     def split(self, X, y=None, groups=None):
         if len(self.splits) > 0:
-            yield from  self.yeld_prepared_splits(X,y,groups)
+            yield from self.yeld_prepared_splits(X, y, groups)
         else:
             doc_indices = set(groups)
 
@@ -713,7 +718,8 @@ class ByDocFold():
                 train_docs = doc_indices - test_docs
                 train_idx = [idx for idx, j in enumerate(
                     groups) if j in train_docs]
-                test_idx = [idx for idx, j in enumerate(groups) if j in test_docs]
+                test_idx = [idx for idx, j in enumerate(
+                    groups) if j in test_docs]
                 yield train_idx, test_idx
 
     def get_n_splits(self, X, y, groups=None):
@@ -775,13 +781,18 @@ def get_tf_string(attr):
     return string
 
 
-def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=False):
+def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=False, **tf_params):
     global tf_features
+    tf_features = {}
     json_path = os.path.join(
         os.getcwd(), defines.PATH_TO_DFS, dir_name, tf_name
     )
-    with open(json_path, "r") as fp:
-        tf_features = json.load(fp)
+    if tf_params:
+       for k,v in tf_params.items():
+            tf_features[k] = v.features
+    else:
+        with open(json_path, "r") as fp:
+            tf_features = json.load(fp)
     features_df = pd.DataFrame()
 
     if is_dic:
@@ -833,9 +844,9 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
         self.crf_model = crf_model
         self.labels = ['not_nar', 'is_nar']
         if scorer:
-            self.f1_scorer = make_scorer(scorer)
+            self.scorer = make_scorer(scorer)
         else:
-            self.f1_scorer = make_scorer(metrics.flat_f1_score,
+            self.scorer = make_scorer(metrics.flat_f1_score,
                                          average='weighted', labels=self.labels)
         self.rs_index = -1
         self.rs = {}
@@ -882,7 +893,7 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
                                                     cv=self.cv,
                                                     n_iter=self.n_iter,
                                                     n_jobs=-1,
-                                                    scoring=self.f1_scorer,
+                                                    scoring=self.scorer,
                                                     random_state=self.random_state,
                                                     verbose=2,
                                                     )
@@ -1062,3 +1073,9 @@ class MyVotingClassifier(VotingClassifier):
         # maj = common_utils.convert_binary_label_to_str(maj)
         maj = self.le_.inverse_transform(maj)
         return maj
+
+
+def get_estimator_features(estimator,**tf_params):
+    all_features = get_features_df(dir_name="", features= Counter(
+        estimator.state_features_).most_common(),tf_name="",is_dic=False,**tf_params)
+    return all_features

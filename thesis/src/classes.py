@@ -298,6 +298,8 @@ class Document:
         text_file = open(print_df_path, "w")
         text_file.write(html)
         text_file.close()
+        
+        
 
 
 class Dataset:
@@ -399,7 +401,10 @@ class Dataset:
 
     def copy_attr(self, other):
         self.__dict__ = other.__dict__.copy()
-
+    
+    def copy_attr(self, other):
+        self.__dict__ = other.__dict__.copy()
+        
 
 class WindowDiff():
     def __init__(self):

@@ -51,21 +51,40 @@ def flatten_groups(groups, y):
     return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
 
 
-def get_report_from_splits(cv_db, prefix):
+def get_report_from_splits(cv_db, prefix, n_t=2):
     scores = []
+    par_scores = []
     full_scores = {}
+    par_full_scores ={}
     for split in cv_db['{}_split'.format(prefix)].unique():
-        y_pred = cv_db[cv_db['{}_split'.format(
-            prefix)] == split]['{}_predicted'.format(prefix)].tolist()
-        y_true = cv_db[cv_db['{}_split'.format(
-            prefix)] == split]['{}_true'.format(prefix)].tolist()
+        split_data=cv_db[cv_db['{}_split'.format(prefix)] == split]
+        y_pred = split_data['{}_predicted'.format(prefix)].tolist()
+        y_true = split_data['{}_true'.format(prefix)].tolist()
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
         score, full_score = common_utils.get_report(y_true, y_pred, np.unique(
             y_true), n_t)
+        par_y_true,par_y_pred=extract_y_paragraph(split_data, prefix)
+        par_score, par_full_score = common_utils.get_report(par_y_true,par_y_pred, np.unique(
+            par_y_true), n_t)
         scores.append(score)
+        par_scores.append(par_score)
         full_scores[split] = full_score
-    return scores, full_scores
+        par_full_scores[split] = par_full_score
+    return scores, full_scores, par_scores, par_full_scores
+
+
+
+def par_contains_nar(group,label,prefix):
+    return any(group['{}_{}'.format(prefix,label)].str.contains('is_nar'))
+
+def extract_y_paragraph(cv_db,prefix):
+    db_par=pd.DataFrame()
+    doc_col='{}_group'.format(prefix)
+    par_col='{}_par'.format(prefix)
+    db_par['par_true']=cv_db.groupby([doc_col,par_col]).apply(par_contains_nar,label='true',prefix=prefix)
+    db_par['par_predicted']=cv_db.groupby([doc_col,par_col]).apply(par_contains_nar,label='predicted',prefix=prefix)
+    return db_par['par_true'].tolist(),db_par['par_predicted'].tolist()
 
 
 def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_splits, docs_map=None):

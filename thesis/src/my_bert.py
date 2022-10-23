@@ -29,22 +29,31 @@ sys.path.append('./src/')
 # device = torch.device("cuda")
 
 
-def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10, batch_size=1024, dir_name=''):
-    cv_db = cv_db_.copy()
+def prepared_cross_validate_bert(docs_map, cv_splits, epoch=3, batch_size=512, dir_name='',file_prefix=''):
+    cv_db = pd.DataFrame()
     alephbert_tokenizer = BertTokenizerFast.from_pretrained(
         'onlplab/alephbert-base')
     bert_preprocess = BertXYTransformer(tokenizer=alephbert_tokenizer)
-
+    bert_dataset_preprocess = BertDatasetransformer(tokenizer=alephbert_tokenizer)
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
         print("{} split started...".format(split))
-        X_train = model_utils.select_docs_from_map(docs_map, indices['train'])
-        X_val = model_utils.select_docs_from_map(docs_map, indices['test'])
-
-        train_tensor_map = bert_preprocess.fit_transform(
-            X=X_train)
-        val_tensor_map = bert_preprocess.fit_transform(
-            X=X_val)
+ 
+        if docs_map.__class__.__name__ == "Dataset":
+            X_train = model_utils.select_docs_from_dataset(docs_map, indices['train'])
+            X_val = model_utils.select_docs_from_dataset(docs_map, indices['test'])
+ 
+            train_tensor_map = bert_dataset_preprocess.fit_transform(
+                X=X_train)
+            val_tensor_map = bert_dataset_preprocess.fit_transform(
+                X=X_val)
+        else:
+            X_train = model_utils.select_docs_from_map(docs_map, indices['train'])
+            X_val = model_utils.select_docs_from_map(docs_map, indices['test'])
+            train_tensor_map = bert_preprocess.fit_transform(
+                X=X_train)
+            val_tensor_map = bert_preprocess.fit_transform(
+                X=X_val)
         start_time = time.time()
         alephbert_model = BertModel.from_pretrained('onlplab/alephbert-base', return_dict=False)
         bert_estimator = BertTrainValidator(pretrained_model=alephbert_model,batch_size=batch_size)
@@ -64,16 +73,19 @@ def prepared_cross_validate_bert(cv_db_, docs_map, cv_splits, epoch=10, batch_si
         single_cv_db['bert_true'] = valid_dict['best_true']
         single_cv_db['bert_proba_0'] = preds_proba[:, 0]
         single_cv_db['bert_proba_1'] = preds_proba[:, 1]
+        single_cv_db['bert_sent_idx'] = single_cv_db.index
+        if 'par' in val_tensor_map:
+            single_cv_db['bert_par'] = val_tensor_map['par']
 
         cv_db = pd.concat([cv_db, single_cv_db],
                           ignore_index=True, axis=0, copy=False)
         losses={}
-        losses['test']= indices['test'].tolist()
-        losses['train'] = indices['train'].tolist()
+        losses['test']= indices['test'].tolist() if not isinstance(indices['test'],list) else indices['test']
+        losses['train'] = indices['train'].tolist() if not isinstance(indices['train'],list) else indices['train']
         for key in ['valid_loss','train_loss']:
             losses[key]=valid_dict[key]
-        common_utils.save_json(losses,dir_name,"split_{}_bert_valid_dict".format(split),convert=False)
-        common_utils.save_db(cv_db,dir_name,'bert_cv_db_all')
+        common_utils.save_json(losses,dir_name,"split_{}_bert_valid_dict_{}".format(split,file_prefix),convert=False)
+        common_utils.save_db(cv_db,dir_name,'bert_cv_db_all_{}'.format(file_prefix))
     return cv_db
 
 
@@ -516,18 +528,23 @@ class BertXYTransformer(TransformerMixin, BaseEstimator):
     def fit_transform(self, X, y=None, **fit_params):
         return self.fit(X, **fit_params).transform(X=X)
 
-    def transform(self, X, y=None):
+    def concat_x_y_g(self,X):
+        print('{}>>>>>>>concat() called'.format(self.__class__.__name__))
         X_ = []
         y_ = []
         groups_ = []
+        for doc in X.keys():
+            X_.extend(X[doc]["X_bert"])
+            y_.extend(X[doc]["y_bert"])
+            groups_.extend([doc for i in range(len(X[doc]["y_bert"]))])
+        return X_,y_,groups_, None
+
+    def transform(self, X, y=None):
+        X_,y_ ,groups_, p_ = self.concat_x_y_g(X)
         indices = X.keys()
         print('{}>>>>>>>transform() called for {} docs'.format(
             self.__class__.__name__, len(indices)))
         X_tensor_map = {}
-        for doc in indices:
-            X_.extend(X[doc]["X_bert"])
-            y_.extend(X[doc]["y_bert"])
-            groups_.extend([doc for i in range(len(X[doc]["y_bert"]))])
         X_tokens = get_test_tokens(self.tokenizer, X_)
         X_tensor_map = convert_single_token2tensor(
             X_tokens)
@@ -535,10 +552,30 @@ class BertXYTransformer(TransformerMixin, BaseEstimator):
         X_tensor_map['y'] = convert_y_tokens2tensor(y_)
         X_tensor_map['y_labels'] = y_
         X_tensor_map['groups'] = groups_
+        if p_:
+            X_tensor_map['par'] = p_
         print('{}>>>>>>>transform() done for {} samples, labels are {}'.format(
             self.__class__.__name__, len(X_),np.unique(y_)))
         return X_tensor_map
 
+class BertDatasetransformer(BertXYTransformer):
+    def __init__(self, tokenizer=None, param=None):
+        print('{}>>>>>>>init() called'.format(self.__class__.__name__))
+        super().__init__(tokenizer,param)
+
+    def concat_x_y_g(self,X):
+        print('{}>>>>>>>concat() called'.format(self.__class__.__name__))
+        X_ = []
+        y_ = []
+        groups_ = []   
+        par_ = []
+
+        for idx,doc in X.items():
+            X_.extend(doc.get_text())
+            y_.extend(doc.get_y())
+            groups_.extend(doc.get_group())
+            par_.extend(doc.get_paragraph())
+        return X_,common_utils.convert_str_label_to_binary(y_),groups_, par_
 
 class BertTransformer(TransformerMixin, BaseEstimator):
 

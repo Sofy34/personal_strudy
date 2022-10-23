@@ -61,13 +61,12 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
         split_data = cv_db[cv_db['{}_split'.format(prefix)] == split]
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
+        labels=np.unique(y_true)
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
-        score, full_score = common_utils.get_report(y_true, y_pred, np.unique(
-            y_true), n_t)
-        par_y_true, par_y_pred = extract_y_paragraph(split_data, prefix)
-        par_score, par_full_score = common_utils.get_report(par_y_true, par_y_pred, np.unique(
-            par_y_true), n_t)
+        score, full_score = common_utils.get_report(y_true, y_pred, labels, n_t)
+        par_y_true, par_y_pred = extract_y_paragraph(split_data, prefix,labels)
+        par_score, par_full_score = common_utils.get_report(par_y_true, par_y_pred, labels, n_t)
         scores.append(score)
         par_scores.append(par_score)
         full_scores[split] = full_score
@@ -75,18 +74,19 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
     return scores, full_scores, par_scores, par_full_scores
 
 
-def par_contains_nar(group, label, prefix):
-    return any(group['{}_{}'.format(prefix, label)].str.contains('is_nar'))
+def par_contains_nar(group, kind, prefix,nar_label):
+    return nar_label in group['{}_{}'.format(prefix, kind)].unique()
 
 
-def extract_y_paragraph(cv_db, prefix):
+def extract_y_paragraph(cv_db, prefix, labels):
     db_par = pd.DataFrame()
     doc_col = '{}_group'.format(prefix)
     par_col = '{}_par'.format(prefix)
+    true_label = 'is_nar' if isinstance(labels[0],str) else 1
     db_par['par_true'] = cv_db.groupby([doc_col, par_col]).apply(
-        par_contains_nar, label='true', prefix=prefix)
+        par_contains_nar, kind='true', prefix=prefix, nar_label=true_label)
     db_par['par_predicted'] = cv_db.groupby([doc_col, par_col]).apply(
-        par_contains_nar, label='predicted', prefix=prefix)
+        par_contains_nar, kind='predicted', prefix=prefix, nar_label=true_label)
     return db_par['par_true'].tolist(), db_par['par_predicted'].tolist()
 
 
@@ -946,6 +946,8 @@ def my_fit_and_score(estimator_pipe, docs_map, scorer, train_idx, test_idx, para
 def select_docs_from_map(docs_map, inidces):
     return {key: docs_map[key] for key in inidces}
 
+def select_docs_from_dataset(dataset, inidces):
+    return {key: dataset.doc_map[key] for key in inidces}
 
 def my_cross_validate(
     estimator,

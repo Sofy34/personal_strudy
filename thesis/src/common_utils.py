@@ -163,7 +163,10 @@ def select_dic_keys(docs_map, keys):
 
 
 def convert_str_label_to_binary(y):
-    return [0 if i == 'not_nar' else 1 for i in y]
+    if isinstance(y[0],str):
+        return [0 if i == 'not_nar' else 1 for i in y]
+    else:
+        return y
 
 
 def convert_binary_label_to_str(y):

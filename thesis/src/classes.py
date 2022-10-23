@@ -87,6 +87,9 @@ class Sentence:
     def get_x(self):
         return self.x
 
+    def get_text(self):
+        return self.text
+
     def get_y(self):
         return self.y
 
@@ -231,8 +234,22 @@ class Document:
                 y.append([sent_seq[i].get_y() for i in range(len(sent_seq))])
         return y
 
+    def get_text(self, reshaped_name=''):
+        text = []
+        if not reshaped_name:
+            text = [sent.get_text() for sent in self.sent_list]
+        else:
+            for sent_seq in self.reshaped[reshaped_name]:
+                text.append([sent_seq[i].get_text() for i in range(len(sent_seq))])
+        return text
+
     def get_group(self, reshaped_name=''):
-        return [self.doc_idx for seq in self.reshaped[reshaped_name]]
+        group = []
+        if not reshaped_name:
+            group = [self.doc_idx for sent in self.sent_list]
+        else:
+            group = [self.doc_idx for seq in self.reshaped[reshaped_name]]
+        return group
 
     def get_paragraph(self, reshaped_name=''):
         par = []
@@ -358,6 +375,12 @@ class Dataset:
         for idx in doc_indices:
             par.extend(self.doc_map[idx].get_paragraph(reshape_name))
         return par
+
+    def get_text(self, doc_indices, reshape_name=''):
+        text = []
+        for idx in doc_indices:
+            text.extend(self.doc_map[idx].get_text(reshape_name))
+        return text
 
     def get_y(self, doc_indices, reshape_name=''):
         y = []

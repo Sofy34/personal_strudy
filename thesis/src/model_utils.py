@@ -61,12 +61,15 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
         split_data = cv_db[cv_db['{}_split'.format(prefix)] == split]
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
-        labels=np.unique(y_true)
+        labels = np.unique(y_true)
         get_prediction_report(y_true, y_pred, np.unique(
             y_true), "Split {}".format(split))
-        score, full_score = common_utils.get_report(y_true, y_pred, labels, n_t)
-        par_y_true, par_y_pred = extract_y_paragraph(split_data, prefix,labels)
-        par_score, par_full_score = common_utils.get_report(par_y_true, par_y_pred, labels, n_t)
+        score, full_score = common_utils.get_report(
+            y_true, y_pred, labels, n_t)
+        par_y_true, par_y_pred = extract_y_paragraph(
+            split_data, prefix, labels)
+        par_score, par_full_score = common_utils.get_report(
+            par_y_true, par_y_pred, labels, n_t)
         scores.append(score)
         par_scores.append(par_score)
         full_scores[split] = full_score
@@ -74,7 +77,7 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
     return scores, full_scores, par_scores, par_full_scores
 
 
-def par_contains_nar(group, kind, prefix,nar_label):
+def par_contains_nar(group, kind, prefix, nar_label):
     return nar_label in group['{}_{}'.format(prefix, kind)].unique()
 
 
@@ -82,7 +85,7 @@ def extract_y_paragraph(cv_db, prefix, labels):
     db_par = pd.DataFrame()
     doc_col = '{}_group'.format(prefix)
     par_col = '{}_par'.format(prefix)
-    true_label = 'is_nar' if isinstance(labels[0],str) else 1
+    true_label = 'is_nar' if isinstance(labels[0], str) else 1
     db_par['par_true'] = cv_db.groupby([doc_col, par_col]).apply(
         par_contains_nar, kind='true', prefix=prefix, nar_label=true_label)
     db_par['par_predicted'] = cv_db.groupby([doc_col, par_col]).apply(
@@ -168,11 +171,12 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
 
 def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_params):
     cv_db = pd.DataFrame()
+    ftr_db = pd.DataFrame()
     if crf_params:
         print("crf_params passed")
     else:
         print("crf_params not passed")
-    for split, indices in cv_splits.items():
+    for idx, (split, indices) in enumerate(cv_splits.items()):
         single_cv_db = pd.DataFrame()
         print("{} split started for {} train sequences...".format(
             split, len(indices['train'])))
@@ -208,10 +212,18 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
         single_cv_db['crf_proba_0'] = crf_proba[:, 0]
         single_cv_db['crf_proba_1'] = crf_proba[:, 1]
         single_cv_db['crf_sent_idx'] = single_cv_db.index
+        # save features from current fold
+        if docs_map.__class__.__name__ == 'Dataset':
+            single_ftr_db = get_estimator_features(crf, **docs_map.tf_params)
+            if idx == 0:
+                ftr_db = single_ftr_db
+            else:
+                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight']], on=['label', 'attr'], suffixes=(
+                    "_{}".format(split), None), how='outer', copy=False, validate='one_to_one')
 
         cv_db = pd.concat([cv_db, single_cv_db],
                           ignore_index=True, axis=0, copy=False)
-    return cv_db
+    return cv_db, ftr_db
 
 
 def get_info_on_pred(y_pred, y_pred_proba, y_test, groups_test):
@@ -788,7 +800,7 @@ def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=F
         os.getcwd(), defines.PATH_TO_DFS, dir_name, tf_name
     )
     if tf_params:
-       for k,v in tf_params.items():
+        for k, v in tf_params.items():
             tf_features[k] = v.features
     else:
         with open(json_path, "r") as fp:
@@ -847,7 +859,7 @@ class CrfClassifier(ClassifierMixin, BaseEstimator):
             self.scorer = make_scorer(scorer)
         else:
             self.scorer = make_scorer(metrics.flat_f1_score,
-                                         average='weighted', labels=self.labels)
+                                      average='weighted', labels=self.labels)
         self.rs_index = -1
         self.rs = {}
 
@@ -946,8 +958,10 @@ def my_fit_and_score(estimator_pipe, docs_map, scorer, train_idx, test_idx, para
 def select_docs_from_map(docs_map, inidces):
     return {key: docs_map[key] for key in inidces}
 
+
 def select_docs_from_dataset(dataset, inidces):
     return {key: dataset.doc_map[key] for key in inidces}
+
 
 def my_cross_validate(
     estimator,
@@ -1077,7 +1091,7 @@ class MyVotingClassifier(VotingClassifier):
         return maj
 
 
-def get_estimator_features(estimator,**tf_params):
-    all_features = get_features_df(dir_name="", features= Counter(
-        estimator.state_features_).most_common(),tf_name="",is_dic=False,**tf_params)
+def get_estimator_features(estimator, **tf_params):
+    all_features = get_features_df(dir_name="", features=Counter(
+        estimator.state_features_).most_common(), tf_name="", is_dic=False, **tf_params)
     return all_features

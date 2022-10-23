@@ -68,6 +68,8 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
             y_true, y_pred, labels, n_t)
         par_y_true, par_y_pred = extract_y_paragraph(
             split_data, prefix, labels)
+        if len(par_y_true) == 0:
+            raise Exception("par_y_true has 0 length!")
         par_score, par_full_score = common_utils.get_report(
             par_y_true, par_y_pred, labels, n_t)
         scores.append(score)
@@ -77,8 +79,8 @@ def get_report_from_splits(cv_db, prefix, n_t=2):
     return scores, full_scores, par_scores, par_full_scores
 
 
-def par_contains_nar(group, kind, prefix, nar_label):
-    return nar_label in group['{}_{}'.format(prefix, kind)].unique()
+def par_contains_nar(group, kind, prefix, nar_label,not_nar_label):
+    return nar_label if nar_label in group['{}_{}'.format(prefix, kind)].unique() else not_nar_label
 
 
 def extract_y_paragraph(cv_db, prefix, labels):
@@ -86,10 +88,11 @@ def extract_y_paragraph(cv_db, prefix, labels):
     doc_col = '{}_group'.format(prefix)
     par_col = '{}_par'.format(prefix)
     true_label = 'is_nar' if isinstance(labels[0], str) else 1
+    false_label = 'not_nar' if isinstance(labels[0], str) else 0
     db_par['par_true'] = cv_db.groupby([doc_col, par_col]).apply(
-        par_contains_nar, kind='true', prefix=prefix, nar_label=true_label)
+        par_contains_nar, kind='true', prefix=prefix, nar_label=true_label, not_nar_label=false_label)
     db_par['par_predicted'] = cv_db.groupby([doc_col, par_col]).apply(
-        par_contains_nar, kind='predicted', prefix=prefix, nar_label=true_label)
+        par_contains_nar, kind='predicted', prefix=prefix, nar_label=true_label, not_nar_label=false_label)
     return db_par['par_true'].tolist(), db_par['par_predicted'].tolist()
 
 
@@ -125,7 +128,7 @@ def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_split
         single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
         single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
         single_cv_db['ens_group'] = y_test_groups.tolist()
-        single_cv_db['ens_split'] = split
+        single_cv_db['ens_split'] = int(split)
         single_cv_db['ens_true'] = y_true
 
         cv_db = pd.concat([cv_db, single_cv_db],
@@ -201,7 +204,7 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
             split, len(y_test), time.strftime("%H:%M:%S", time.gmtime(fit_time))))
         single_cv_db['crf_group'] = flatten_groups(groups_test, y_test)
         single_cv_db['crf_par'] = flatten(par_test)
-        single_cv_db['crf_split'] = split
+        single_cv_db['crf_split'] = int(split)
         single_cv_db['crf_predicted'] = flatten(crf.predict(X_test))
         predict_time = time.time() - fit_time - start_time
         print("{} split predict took {}".format(

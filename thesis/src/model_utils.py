@@ -57,13 +57,13 @@ def get_report_by_unit(cv_db, prefix, unit='split', n_t=2):
     par_scores = []
     full_scores = {}
     par_full_scores = {}
-    for split in cv_db['{}_{}'.format(prefix,unit)].unique():
-        split_data = cv_db[cv_db['{}_{}'.format(prefix,unit)] == split]
+    for split in cv_db['{}_{}'.format(prefix, unit)].unique():
+        split_data = cv_db[cv_db['{}_{}'.format(prefix, unit)] == split]
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
         labels = np.unique(y_true)
         get_prediction_report(y_true, y_pred, np.unique(
-            y_true), "{} {}".format(unit,split))
+            y_true), "{} {}".format(unit, split))
         score, full_score = common_utils.get_report(
             y_true, y_pred, labels, n_t)
         par_y_true, par_y_pred = extract_y_paragraph(
@@ -79,7 +79,7 @@ def get_report_by_unit(cv_db, prefix, unit='split', n_t=2):
     return scores, full_scores, par_scores, par_full_scores
 
 
-def par_contains_nar(group, kind, prefix, nar_label,not_nar_label):
+def par_contains_nar(group, kind, prefix, nar_label, not_nar_label):
     return nar_label if nar_label in group['{}_{}'.format(prefix, kind)].unique() else not_nar_label
 
 
@@ -96,24 +96,23 @@ def extract_y_paragraph(cv_db, prefix, labels):
     return db_par['par_true'].tolist(), db_par['par_predicted'].tolist()
 
 
-def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_splits, docs_map=None):
+def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, **crf_params):
     prediction_db = prediction_db_.copy()
-    cv_db = cv_db_.copy()
+    cv_db = pd.DataFrame()
     cols = ['crf_proba_0', 'crf_proba_1', 'bert_proba_0', 'bert_proba_1']
-
+    ens_clf_pred_proba = None
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
+        
         print("{} split started...".format(split))
-        print("train:", indices['train'])
-        print("test:", indices['test'])
         if(estimator.__class__.__name__ == 'CRF'):
             X_train, y_train, X_test, y_test = pack_train_test_for_crf(
-                prediction_db, indices, cols, docs_map)
+                prediction_db, indices, cols, **crf_params)
         else:
             X_train, y_train, X_test, y_test = pack_train_test_for_estimator(
                 prediction_db, indices, cols)
-        y_test_groups = prediction_db[prediction_db['crf_group'].isin(
-            indices['test'])]['crf_group']
+        group_test, par_test = pack_group_par_for_estimator(
+            prediction_db, indices)
         ens_clf = estimator.fit(X_train, y_train)
         ens_clf_pred = ens_clf.predict(X_test)
         if(estimator.__class__.__name__ == 'CRF'):
@@ -122,18 +121,29 @@ def prepared_cross_validate_ensemble(estimator, cv_db_, prediction_db_, cv_split
             ens_clf_pred = flatten(ens_clf_pred)
             y_true = flatten(y_test)
         else:
-            ens_clf_pred_proba = ens_clf.predict_proba(X_test)
+            # ens_clf_pred_proba = ens_clf.predict_proba(X_test)
             y_true = y_test.tolist()
         single_cv_db['ens_predicted'] = ens_clf_pred
-        single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
-        single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
-        single_cv_db['ens_group'] = y_test_groups.tolist()
+        if ens_clf_pred_proba:
+            single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
+            single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
+        single_cv_db['ens_group'] = group_test.tolist()
         single_cv_db['ens_split'] = int(split)
         single_cv_db['ens_true'] = y_true
+        single_cv_db['ens_par'] = par_test.tolist()
 
         cv_db = pd.concat([cv_db, single_cv_db],
                           ignore_index=True, axis=0, copy=False)
     return cv_db
+
+
+def merge_pred_db(dir_name, bert_path, crf_path):
+    bert_pred = common_utils.load_db(dir_name, bert_path)
+    crf_pred = common_utils.load_db(dir_name, crf_path)
+    merged_pred = bert_pred.merge(crf_pred, left_on=['bert_group', 'bert_sent_idx'], right_on=[
+        'crf_group', 'crf_sent_idx'], validate='one_to_one')
+    merged_pred['ens_par'] = merged_pred['crf_par']
+    return merged_pred
 
 
 def pack_train_test_for_estimator(prediction_db, indices, cols):
@@ -148,7 +158,15 @@ def pack_train_test_for_estimator(prediction_db, indices, cols):
     return X_train, y_train, X_test, y_test
 
 
-def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
+def pack_group_par_for_estimator(prediction_db, indices):
+    group_test = prediction_db[prediction_db['crf_group'].isin(
+        indices['test'])]['bert_group']
+    par_test = prediction_db[prediction_db['crf_group'].isin(
+        indices['test'])]['bert_par']
+    return group_test, par_test
+
+
+def pack_train_test_for_crf(prediction_db, indices, cols, **crf_params):
     X_flat = []
     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['train'])].iterrows():
         item = {}
@@ -157,8 +175,10 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
         X_flat.append(item)
     y = prediction_db[prediction_db['crf_group'].isin(
         indices['train'])]['crf_true']
-    X_train = common_utils.reshape_to_seq(X_flat, 8, 8)
-    y_train = common_utils.reshape_to_seq(y, 8, 8)
+    X_train = common_utils.reshape_to_seq(
+        X_flat, crf_params['seq_len'], crf_params['seq_step'])
+    y_train = common_utils.reshape_to_seq(
+        y, crf_params['seq_len'], crf_params['seq_step'])
     X_flat = []
     for idx, row in prediction_db[prediction_db['crf_group'].isin(indices['test'])].iterrows():
         item = {}
@@ -167,8 +187,10 @@ def pack_train_test_for_crf(prediction_db, indices, cols, docs_map):
         X_flat.append(item)
     y = prediction_db[prediction_db['crf_group'].isin(
         indices['test'])]['crf_true']
-    y_test = common_utils.reshape_to_seq(y, 8, 8)
-    X_test = common_utils.reshape_to_seq(X_flat, 8, 8)
+    y_test = common_utils.reshape_to_seq(
+        y, crf_params['seq_len'], crf_params['seq_step'])
+    X_test = common_utils.reshape_to_seq(
+        X_flat, crf_params['seq_len'], crf_params['seq_step'])
     return X_train, y_train, X_test, y_test
 
 
@@ -221,7 +243,7 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
             if idx == 0:
                 ftr_db = single_ftr_db
             else:
-                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight']], on=['label', 'attr'], suffixes=(
+                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight','string']], on=['label', 'attr'], suffixes=(
                     "_{}".format(split), None), how='outer', copy=False, validate='one_to_one')
 
         cv_db = pd.concat([cv_db, single_cv_db],

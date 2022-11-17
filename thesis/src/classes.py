@@ -12,7 +12,8 @@ from scipy import sparse
 import defines
 import numpy as np
 import pickle
-from sklearn.metrics import make_scorer,accuracy_score,balanced_accuracy_score,precision_score,recall_score,f1_score
+import re
+from sklearn.metrics import make_scorer, accuracy_score, balanced_accuracy_score, precision_score, recall_score, f1_score
 from sklearn.model_selection import train_test_split, cross_val_score, cross_validate
 
 sys.path.append('./src/')
@@ -240,7 +241,8 @@ class Document:
             text = [sent.get_text() for sent in self.sent_list]
         else:
             for sent_seq in self.reshaped[reshaped_name]:
-                text.append([sent_seq[i].get_text() for i in range(len(sent_seq))])
+                text.append([sent_seq[i].get_text()
+                            for i in range(len(sent_seq))])
         return text
 
     def get_group(self, reshaped_name=''):
@@ -296,12 +298,12 @@ class Document:
     def print_colored_indices(self, y_pred=None):
         if y_pred is None and self.sent_list[0].get_pred_y() is None:
             raise Exception("y predicted was not set!")
-        self.colored_ind_df['true'] = model_utils.get_colored_from_list(
+        self.colored_ind_df.loc[0, 'true'] = model_utils.get_colored_from_list(
             self.get_y(), "is_nar")
-        self.colored_ind_df['pred'] = model_utils.get_colored_from_list(
+        self.colored_ind_df.loc[0, 'pred'] = model_utils.get_colored_from_list(
             self.get_pred_y(), "is_nar")
         self.write_html("colored_indices")
-        return self.print_df
+        return self.colored_ind_df
 
     def write_html(self, label, index=True, style="df_style"):
         html = self.print_df.to_html(
@@ -315,8 +317,6 @@ class Document:
         text_file = open(print_df_path, "w")
         text_file.write(html)
         text_file.close()
-        
-        
 
 
 class Dataset:
@@ -424,10 +424,10 @@ class Dataset:
 
     def copy_attr(self, other):
         self.__dict__ = other.__dict__.copy()
-    
+
     def copy_attr(self, other):
         self.__dict__ = other.__dict__.copy()
-        
+
 
 class WindowDiff():
     def __init__(self):
@@ -438,10 +438,50 @@ class WindowDiff():
         # print("[{}:{}] y={} cnt {}".format(start_idx,end_idx-1,y[start_idx:end_idx],cnt))
         return cnt
 
+    def get_boundaries_indices(self, y):
+        y, _ = self.convert_labels(y, None)
+        y_str = ''.join(str(item) for item in y)
+        start_str = '01'
+        end_str = '10'
+        nar_begin = []
+        nar_end = []
+        if re.match(r'^1', y_str):
+            nar_begin.append(0)
+        for match in re.finditer(start_str, y_str):
+            nar_begin.append(match.start()+1)
+        for match in re.finditer(end_str, y_str):
+            nar_end.append(match.start()+1)
+        if re.search(r'1$', y_str):
+            nar_end.append(len(y_str))
+
+        return nar_begin, nar_end
+
+    def get_near_miss_idx(self, y_true, y_pred):
+        misses = {}
+        misses['start'] = {}
+        misses['end'] = {}
+        misses['start']['fp-1'] = []
+        misses['start']['fn+1'] = []
+        misses['end']['fn-1'] = []
+        misses['end']['fp+1'] = []
+
+        for start_idx in y_true['start']:
+            if (start_idx+1 in y_pred['start']):
+                misses['start']['fn+1'].append(start_idx)
+            if (start_idx-1 in y_pred['start']):
+                misses['start']['fp-1'].append(start_idx-1)
+        for end_idx in y_true['end']:
+            if (end_idx+1 in y_pred['end']):
+                misses['end']['fp+1'].append(end_idx+1)
+            if (end_idx-1 in y_pred['end']):
+                misses['end']['fn-1'].append(end_idx)
+        return misses
+
     def convert_labels(self, y_true, y_pred):
         if isinstance(y_true[0], str):
             y_true = common_utils.convert_str_label_to_binary(y_true)
-            y_pred = common_utils.convert_str_label_to_binary(y_pred)
+            if y_pred:
+                y_pred = common_utils.convert_str_label_to_binary(y_pred)
         return y_true, y_pred
 
     def calc_penalty(self, y_true, y_pred, window_size=15):
@@ -593,37 +633,84 @@ class MySegEval():
         return self.scores
 
 
+class MyScoreSummarizer():
+
+    def __init__(self, pred_df):
+        print("{} init called".format(self.__class__.__name__))
+        self.pred_df = pred_df
+        self.report = {}
+        self.print_df = {}
+        self.latex_str = {}
+        self.my_fixer=MyPredFixer(pred_df)
+        self.my_fixer.fix_error_all_prefix()
+        self.fixed_df=self.my_fixer.fixed_df
+        self.prefixes = ['bert', 'crf', 'ens']
+
+    def get_score(self, prefix, unit='split'):
+        self.labels = [
+            str(i) for i in self.pred_df['{}_true'.format(prefix)].unique().tolist()]
+        self.s_scores, self.s_dict, self.par_scores, self.par_dict = model_utils.get_report_by_unit(
+            self.pred_df, prefix, unit)
+        self.f_s_scores, self.f_s_dict, self.f_par_scores, self.f_par_dict = model_utils.get_report_by_unit(
+            self.fixed_df, prefix, unit)
+        self.report[prefix] = MyReport(
+            self.s_dict, self.f_s_dict, self.par_dict, prefix, labels=self.labels)
+        self.print_df[prefix] = self.report[prefix].get_print_df()
+        self.latex_str[prefix] = self.print_df[prefix].to_csv(
+            sep='&', line_terminator="\\", float_format='%.3f')
+
+    def get_all_scores(self, unit='split'):
+        for t in self.prefixes:
+            self.get_score(t, unit)
+
+
 class MyReport():
 
-    def __init__(self):
+    def __init__(self, sent_dict, fixed_dict, par_dict, name, labels=['not_nar', 'nar']):
         print("{} init called".format(self.__class__.__name__))
-
-    def get_avg_scores(self, scr_dict, labels=['not_nar', 'nar']):
-        if not isinstance(scr_dict, dict):
+        if not (isinstance(sent_dict, dict) and isinstance(par_dict, dict)):
             raise Exception("Expect to get dictionary as input")
-
-        avg = {}
-
+        self.scr_dict = {}
+        self.types = ['sent', 'fixed', 'par']
+        self.scr_dict['sent'] = sent_dict
+        self.scr_dict['par'] = par_dict
+        self.scr_dict['fixed'] = fixed_dict
+        self.avg = {}
+        self.labels = []
         for l in labels:
-            avg[l] = {}
-        avg['weighted avg'] = {}
-        for label in avg.keys():
-            avg[label] = {}
-            avg[label]['recall'] = []
-            avg[label]['prec'] = []
-            avg[label]['f1'] = []
+            self.labels.append(l)
+        self.labels.append('weighted avg')
 
-            for key, val in scr_dict.items():
-                avg[label]['f1'].append(val[label]['f1-score'])
-                avg[label]['recall'].append(val[label]['recall'])
-                avg[label]['prec'].append(val[label]['precision'])
+        self.metrics = ['f1', 'recall', 'prec']
+        self.name = name
 
-        for label, item in avg.items():
-            avg[label]['avg'] = {}
-            for k, v in item.items():
-                if k != 'avg':
-                    avg[label]['avg'][k] = np.mean(v)
-        return avg
+    def get_avg_scores(self, name):
+
+        self.avg[name] = pd.DataFrame()
+
+        for label in self.labels:
+            for key, val in self.scr_dict[name].items():
+                self.avg[name].loc[key, '{}_f1'.format(
+                    label)] = val[label]['f1-score']
+                self.avg[name].loc[key, '{}_recall'.format(
+                    label)] = val[label]['recall']
+                self.avg[name].loc[key, '{}_prec'.format(
+                    label)] = val[label]['precision']
+
+        self.avg[name].loc['mean'] = self.avg[name].mean()
+
+        return self.avg[name]
+
+    def get_print_df(self):
+        for t in self.types:
+            self.get_avg_scores(t)
+        self.print_df = pd.DataFrame()
+        for m in self.metrics:
+            for l in self.labels:
+                for t in self.types:
+                    self.print_df.loc[l, '{}_{}'.format(
+                        t, m)] = self.avg[t].loc['mean', "{}_{}".format(l, m)]
+        return self.print_df
 
 
 class MyScorer():
@@ -636,31 +723,130 @@ class MyScorer():
                               'recall': make_scorer(recall_score, average='weighted'),
                               'f1': make_scorer(f1_score, average='weighted'),
                               }
-        self.scorer_names=list(self.custom_scorer.keys())
-        self.scores_df=pd.DataFrame()
+        self.scorer_names = list(self.custom_scorer.keys())
+        self.scores_df = pd.DataFrame()
 
-  
-    def add_score(self,scores, regressorName, prefix):
+    def add_score(self, scores, regressorName, prefix):
         for name in self.scorer_names:
-            self.scores_df.loc[regressorName + '_' + prefix, name] = scores["test_"+name].mean()
+            self.scores_df.loc[regressorName + '_' +
+                               prefix, name] = scores["test_"+name].mean()
 
-    
-    def get_cross_val_score(self,estimator,X_train,y_train,groups,prefix="",cv=10):
+    def get_cross_val_score(self, estimator, X_train, y_train, groups, prefix="", cv=10):
         name = estimator.__class__.__name__
         start_time = time.time()
         print('*********' + name + '*********')
         full_scores = cross_validate(
             estimator,
-            X_train, 
-            y_train, 
+            X_train,
+            y_train,
             groups=groups,
             cv=cv,
             scoring=self.custom_scorer,
-            n_jobs = -1
+            n_jobs=-1
         )
-        self.add_score(full_scores,name,prefix)
+        self.add_score(full_scores, name, prefix)
         end_time = time.time()-start_time
-        print("{} took  {}".format(name, time.strftime("%H:%M:%S", time.gmtime(end_time))))
- 
-    
-    
+        print("{} took  {}".format(name, time.strftime(
+            "%H:%M:%S", time.gmtime(end_time))))
+
+
+class MyPredFixer():
+    def __init__(self, pred_df):
+        print("{} init called".format(self.__class__.__name__))
+        self.wd = WindowDiff()
+        self.pred_df = pred_df
+        self.fixed_df = pred_df.copy()
+        self.prefixes = ['bert', 'crf', 'ens']
+        self.stat={}
+
+    def get_near_miss(self, prefix):
+        start_true, end_true = self.wd.get_boundaries_indices(
+            self.pred_df['{}_true'.format(prefix)].tolist())
+        start_pred, end_pred = self.wd.get_boundaries_indices(
+            self.pred_df['{}_predicted'.format(prefix)].tolist())
+        self.near_misses = self.wd.get_near_miss_idx(
+            y_true={'start': start_true, 'end': end_true}, y_pred={'start': start_pred, 'end': end_pred})
+        self.get_near_miss_stat()
+        
+    def get_near_miss_stat(self):
+        self.stat['near']={}
+        self.stat['near']['tot']=0
+        self.stat['near']['fp']=0
+        self.stat['near']['fn']=0
+        for k,v in self.near_misses.items():
+            for i,j in v.items():
+                self.stat['near']['tot']+=len(j)
+                if 'fp' in i:
+                    self.stat['near']['fp']+=len(j)
+                if 'fn' in i:
+                    self.stat['near']['fn']+=len(j)
+                
+    def get_mid_miss_stat(self):
+        self.stat['mid']=len(self.middle_miss)
+        
+    def get_stand_alone_stat(self):
+        self.stat['stand_alone']=len(self.stand_alone)
+
+    def get_all_stat(self):
+        self.get_near_miss_stat()
+        self.get_mid_miss_stat()
+        self.get_stand_alone_stat()
+
+
+
+    def fix_near_miss(self, prefix):
+        self.get_near_miss(prefix)
+        print("near misses to be fixed\n",self.stat['near'])
+        self.fixed_df.loc[self.near_misses['start']
+                          ['fp-1'], '{}_predicted'.format(prefix)] = 0
+        self.fixed_df.loc[self.near_misses['start']
+                          ['fn+1'], '{}_predicted'.format(prefix)] = 1
+        self.fixed_df.loc[self.near_misses['end']
+                          ['fp+1'], '{}_predicted'.format(prefix)] = 0
+        self.fixed_df.loc[self.near_misses['end']
+                          ['fn-1'], '{}_predicted'.format(prefix)] = 1
+
+    def get_middle_miss(self, prefix):
+        true_narr = self.pred_df[self.pred_df['{}_true'.format(
+            prefix)] == 1].copy()
+        middle_miss_df = true_narr['{}_predicted'.format(prefix)].where((
+            (true_narr['{}_predicted'.format(prefix)] == 0) & (true_narr['{}_predicted'.format(prefix)].shift(1) == 1) & (true_narr['{}_predicted'.format(prefix)].shift(-1) == 1)))
+        middle_miss_df.dropna(inplace=True)
+        self.middle_miss = middle_miss_df.index.tolist()
+        self.get_mid_miss_stat()
+
+    def fix_middle_miss(self, prefix):
+        self.get_middle_miss(prefix)
+        print("{} middle misses to be fixed".format(self.stat['mid']))
+        self.fixed_df.loc[self.middle_miss, '{}_predicted'.format(prefix)] = 1
+
+    def get_stand_alone(self, prefix):
+        true_not_nar = self.pred_df[self.pred_df['{}_true'.format(
+            prefix)] == 0].copy()
+        stand_alone_df = true_not_nar['{}_predicted'.format(prefix)].where(((true_not_nar['{}_predicted'.format(prefix)] == 1) &
+                                                                            (true_not_nar['{}_predicted'.format(prefix)].shift(1) == 0) &
+                                                                            (true_not_nar['{}_predicted'.format(prefix)].shift(-1) == 0) &
+                                                                            (true_not_nar['{}_predicted'.format(prefix)].shift(2) == 0) &
+                                                                            (true_not_nar['{}_predicted'.format(
+                                                                                prefix)].shift(-2) == 0)
+                                                                            ))
+        stand_alone_df.dropna(inplace=True)
+        self.stand_alone = stand_alone_df.index.tolist()
+        self.get_stand_alone_stat()
+
+    def fix_stand_alone(self, prefix):
+        self.get_stand_alone(prefix)
+        print("{} stande alone to be fixed".format(self.stat['stand_alone']))
+        self.fixed_df.loc[self.stand_alone, '{}_predicted'.format(prefix)] = 0
+
+    def fix_errors(self, prefix):
+        self.labels = self.pred_df['{}_true'.format(prefix)].unique().tolist()
+        self.fix_near_miss(prefix)
+        self.fix_middle_miss(prefix)
+        self.fix_stand_alone(prefix)
+
+    def fix_error_all_prefix(self):
+        for t in self.prefixes:
+            print(t)
+            self.fix_errors(t)
+

@@ -52,7 +52,7 @@ def flatten_groups(groups, y):
     return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
 
 
-def get_report_by_unit(cv_db, prefix, unit='split', n_t=2):
+def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval =False):
     scores = []
     par_scores = []
     full_scores = {}
@@ -62,16 +62,17 @@ def get_report_by_unit(cv_db, prefix, unit='split', n_t=2):
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
         labels = np.unique(y_true)
-        get_prediction_report(y_true, y_pred, np.unique(
-            y_true), "{} {}".format(unit, split))
+        if print_rep:
+            get_prediction_report(y_true, y_pred, np.unique(
+                y_true), "{} {}".format(unit, split))
         score, full_score = common_utils.get_report(
-            y_true, y_pred, labels, n_t)
+            y_true, y_pred, labels, n_t, segeval)
         par_y_true, par_y_pred = extract_y_paragraph(
             split_data, prefix, labels)
         if len(par_y_true) == 0:
             raise Exception("par_y_true has 0 length!")
         par_score, par_full_score = common_utils.get_report(
-            par_y_true, par_y_pred, labels, n_t)
+            par_y_true, par_y_pred, labels, n_t, segeval)
         scores.append(score)
         par_scores.append(par_score)
         full_scores[split] = full_score

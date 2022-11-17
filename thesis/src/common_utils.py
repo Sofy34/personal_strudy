@@ -124,15 +124,16 @@ def get_score(y_true, y_pred, labels, sample_weight=None):
     return output_dict['weighted avg']['f1-score']
 
 
-def get_report(y_true, y_pred, labels, sample_weight=None,n_t=2):
+def get_report(y_true, y_pred, labels, sample_weight=None,n_t=2,segeval=False):
     output_dict = classification_report(
         y_true=y_true,
         y_pred=y_pred,
         labels=labels,
         output_dict=True)
-    my_se=classes.MySegEval(n_t=n_t)
-    output_dict['segeval']=my_se.get_scores(y_true,y_pred)
-    del output_dict['segeval']['b_stat'] # tbd temporary remove statistic form report to shorten prints
+    if segeval:
+        my_se=classes.MySegEval(n_t=n_t)
+        output_dict['segeval']=my_se.get_scores(y_true,y_pred)
+        del output_dict['segeval']['b_stat'] # tbd temporary remove statistic form report to shorten prints
     score = output_dict['weighted avg']['f1-score']
     return score, output_dict
 
@@ -279,8 +280,8 @@ def reshape_to_seq(input, seq_len, step):
     return [input[i:i+seq_len] for i in range(0, len(input), step)]
 
 
-def dump_to_file(_object, file_name):
-    path = os.path.join(os.getcwd(), defines.PATH_TO_DFS,
+def dump_to_file(_object, dir_name, file_name):
+    path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,
                         file_name+".p")
     pickle.dump(_object, open(path, "wb"))
 

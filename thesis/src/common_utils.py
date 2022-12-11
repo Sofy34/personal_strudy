@@ -209,11 +209,11 @@ def add_sent_to_docs_map(dir_name, docs_map):
         docs_map[key]['y_bert'] = sent_db['is_nar'].tolist()
 
 
-def save_db(db, dir_name, file_name, keep_index=False):
+def save_db(db, dir_name, file_name, keep_index=False,  float_format='%.5f'):
     path = os.path.join(os.getcwd(), defines.PATH_TO_DFS,
                         dir_name, "{}.csv".format(file_name))
-    print("Saving {},  index {}".format(path, keep_index))
-    db.to_csv(path, index=keep_index)
+    print("Saving {}, \nindex {}\nfloat_format {}".format(path, keep_index,float_format))
+    db.to_csv(path, index=keep_index,float_format=float_format)
 
 
 def load_db(dir_name, file_name, keep_index=False):

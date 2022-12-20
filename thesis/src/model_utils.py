@@ -52,7 +52,7 @@ def flatten_groups(groups, y):
     return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
 
 
-def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval =False):
+def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval =False, use_par=True):
     scores = []
     par_scores = []
     full_scores = {}
@@ -67,16 +67,17 @@ def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, sege
                 y_true), "{} {}".format(unit, split))
         score, full_score = common_utils.get_report(
             y_true, y_pred, labels, n_t, segeval)
-        par_y_true, par_y_pred = extract_y_paragraph(
-            split_data, prefix, labels)
-        if len(par_y_true) == 0:
-            raise Exception("par_y_true has 0 length!")
-        par_score, par_full_score = common_utils.get_report(
-            par_y_true, par_y_pred, labels, n_t, segeval)
+        if use_par:
+            par_y_true, par_y_pred = extract_y_paragraph(
+                split_data, prefix, labels)
+            if len(par_y_true) == 0:
+                raise Exception("par_y_true has 0 length!")
+            par_score, par_full_score = common_utils.get_report(
+                par_y_true, par_y_pred, labels, n_t, segeval)
+            par_scores.append(par_score)
+            par_scores.append(par_score)
         scores.append(score)
-        par_scores.append(par_score)
         full_scores[split] = full_score
-        par_full_scores[split] = par_full_score
     return scores, full_scores, par_scores, par_full_scores
 
 
@@ -97,10 +98,13 @@ def extract_y_paragraph(cv_db, prefix, labels):
     return db_par['par_true'].tolist(), db_par['par_predicted'].tolist()
 
 
-def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, **crf_params):
+def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, use_proba=True,**crf_params):
     prediction_db = prediction_db_.copy()
     cv_db = pd.DataFrame()
-    cols = ['crf_proba_0', 'crf_proba_1', 'bert_proba_0', 'bert_proba_1']
+    if use_proba:
+        cols = ['crf_proba_0', 'crf_proba_1', 'bert_proba_0', 'bert_proba_1']
+    else:
+        cols = ['crf_predicted', 'bert_predicted']
     ens_clf_pred_proba = None
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()

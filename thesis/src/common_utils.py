@@ -292,3 +292,16 @@ def load_pickle(dir_name, file_name):
 
 def get_single_unique(group):
     return group.unique()[0]
+
+def order_meta_features(_meta):
+    meta=_meta.copy()
+    meta['prefix']=meta['attr'].astype(str).str[:3]
+    meta.loc[meta['prefix'].str.contains(r"\-3",na=False),'order']=-3
+    meta.loc[meta['prefix'].str.contains(r"\-2",na=False),'order']=1
+    meta.loc[meta['prefix'].str.contains(r"\-1",na=False),'order']=2
+    meta.loc[~meta['prefix'].str.contains(r"\+|\-",na=False),'order']=3
+    meta.loc[meta['prefix'].str.contains(r"\+1",na=False),'order']=4
+    meta.loc[meta['prefix'].str.contains(r"\+2",na=False),'order']=5
+    meta.loc[meta['prefix'].str.contains(r"\+3",na=False),'order']=6
+    meta.sort_values(by=['order','mean'],ascending=False,inplace=True)
+    return meta

@@ -635,25 +635,25 @@ class MySegEval():
 
 class MyScoreSummarizer():
 
-    def __init__(self, pred_df):
+    def __init__(self, pred_df, fix_list):
         print("{} init called".format(self.__class__.__name__))
         self.pred_df = pred_df
         self.report = {}
         self.print_df = {}
         self.latex_str = {}
-        self.my_fixer = MyPredFixer(pred_df)
+        self.my_fixer = MyPredFixer(pred_df, fix_list)
         self.my_fixer.fix_error_all_prefix()
         self.fixed_df = self.my_fixer.fixed_df
-        self.prefixes = ['bert', 'crf', 'ens']
-        self.f_s_scores={}
-        self.f_s_dict={}
-        self.par_scores={}
-        self.par_dict={}
-        self.f_par_scores={}
-        self.f_par_dict={}
-        self.s_scores={}
-        self.s_dict={}
-
+        # self.prefixes = ['bert', 'crf', 'ens']
+        self.prefixes=['ens']
+        self.f_s_scores = {}
+        self.f_s_dict = {}
+        self.par_scores = {}
+        self.par_dict = {}
+        self.f_par_scores = {}
+        self.f_par_dict = {}
+        self.s_scores = {}
+        self.s_dict = {}
 
     def get_score(self, prefix, unit='split'):
         self.labels = [
@@ -667,8 +667,7 @@ class MyScoreSummarizer():
         self.print_df[prefix] = self.report[prefix].get_print_df()
         self.get_latex_table(prefix)
 
-
-    def get_latex_table(self,prefix):
+    def get_latex_table(self, prefix):
         self.latex_str[prefix] = self.print_df[prefix].to_csv(
             sep='&', line_terminator="\\", float_format='%.3f')
 
@@ -684,9 +683,11 @@ class MyReport():
         if not (isinstance(sent_dict, dict) and isinstance(par_dict, dict)):
             raise Exception("Expect to get dictionary as input")
         self.scr_dict = {}
-        self.types = ['sent', 'fixed', 'par']
+        self.types = ['sent', 'fixed']
         self.scr_dict['sent'] = sent_dict
-        self.scr_dict['par'] = par_dict
+        if par_dict:
+            self.types.append('par')
+            self.scr_dict['par'] = par_dict
         self.scr_dict['fixed'] = fixed_dict
         self.avg = {}
         self.labels = []
@@ -698,17 +699,16 @@ class MyReport():
         self.name = name
 
     def get_avg_scores(self, name):
-
         self.avg[name] = pd.DataFrame()
 
         for label in self.labels:
             for key, val in self.scr_dict[name].items():
-                self.avg[name].loc[key, '{}_f1'.format(
-                    label)] = val[label]['f1-score']
-                self.avg[name].loc[key, '{}_recall'.format(
-                    label)] = val[label]['recall']
-                self.avg[name].loc[key, '{}_prec'.format(
-                    label)] = val[label]['precision']
+                    self.avg[name].loc[key, '{}_f1'.format(
+                        label)] = val[label]['f1-score']
+                    self.avg[name].loc[key, '{}_recall'.format(
+                        label)] = val[label]['recall']
+                    self.avg[name].loc[key, '{}_prec'.format(
+                        label)] = val[label]['precision']
 
         self.avg[name].loc['mean'] = self.avg[name].mean()
 
@@ -752,7 +752,7 @@ class MyScorer():
             estimator,
             X_train,
             y_train,
-            groups=groups, 
+            groups=groups,
             cv=cv,
             scoring=self.custom_scorer,
             n_jobs=-1
@@ -764,18 +764,24 @@ class MyScorer():
 
 
 class MyPredFixer():
-    def __init__(self, pred_df):
+    def __init__(self, pred_df, fix_list):
         print("{} init called".format(self.__class__.__name__))
         self.wd = WindowDiff()
         self.pred_df = pred_df
+        self.fix_list=fix_list
         self.fixed_df = pred_df.copy()
-        self.prefixes = ['bert', 'crf', 'ens']
+        # self.prefixes = ['bert', 'crf', 'ens']
+        self.prefixes=['ens']
         self.stat = {}
         self.near_misses = {}
         self.middle_miss = {}
         self.stand_alone = {}
+        self.double_stand_alone = {}
+        self.double_middle_miss = {}
+        self.tree_middle_miss={}
+        self.four_middle_miss={}
         for t in self.prefixes:
-            self.stat[t]={}
+            self.stat[t] = {}
 
     def get_near_miss(self, prefix):
         start_true, end_true = self.wd.get_boundaries_indices(
@@ -786,7 +792,7 @@ class MyPredFixer():
             y_true={'start': start_true, 'end': end_true}, y_pred={'start': start_pred, 'end': end_pred})
         self.get_near_miss_stat(prefix)
 
-    def get_near_miss_stat(self,prefix):
+    def get_near_miss_stat(self, prefix):
         self.stat[prefix]['near'] = {}
         self.stat[prefix]['near']['tot'] = 0
         self.stat[prefix]['near']['fp'] = 0
@@ -799,23 +805,40 @@ class MyPredFixer():
                 if 'fn' in i:
                     self.stat[prefix]['near']['fn'] += len(j)
 
-    def get_mid_miss_stat(self,prefix):
+    def get_mid_miss_stat(self, prefix):
         self.stat[prefix]['mid'] = len(self.middle_miss[prefix])
 
-    def get_stand_alone_stat(self,prefix):
+    def get_double_mid_miss_stat(self, prefix):
+        self.stat[prefix]['double_mid_miss'] = len(
+            self.double_middle_miss[prefix])
+
+    def get_stand_alone_stat(self, prefix):
         self.stat[prefix]['stand_alone'] = len(self.stand_alone[prefix])
 
+    def get_double_stand_alone_stat(self, prefix):
+        self.stat[prefix]['double_stand_alone'] = len(
+            self.double_stand_alone[prefix])
+
+    def get_tree_mid_miss_stat(self, prefix):
+        self.stat[prefix]['tree_mid_miss'] = len(
+            self.tree_middle_miss[prefix])
+    def get_four_mid_miss_stat(self, prefix):
+        self.stat[prefix]['four_mid_miss'] = len(
+            self.four_middle_miss[prefix])
+        
     def get_total_stat(self, prefix):
         self.stat[prefix]['total_fp'] = self.pred_df[(self.pred_df['{}_true'.format(prefix)] == 0) & (
             self.pred_df['{}_predicted'.format(prefix)] == 1)].shape[0]
         self.stat[prefix]['total_fn'] = self.pred_df[(self.pred_df['{}_true'.format(prefix)] == 1) & (
             self.pred_df['{}_predicted'.format(prefix)] == 0)].shape[0]
 
-    def get_all_stat(self,prefix):
+    def get_all_stat(self, prefix):
         self.get_total_stat(prefix)
         self.get_near_miss_stat(prefix)
-        self.get_mid_miss_stat(prefix)
-        self.get_stand_alone_stat(prefix)
+        if('single_miss' in self.fix_list):
+            self.get_mid_miss_stat(prefix)
+        if('single_sa' in self.fix_list):
+            self.get_stand_alone_stat(prefix)
 
     def fix_near_miss(self, prefix):
         self.get_near_miss(prefix)
@@ -828,49 +851,208 @@ class MyPredFixer():
                           ['fp+1'], '{}_predicted'.format(prefix)] = 0
         self.fixed_df.loc[self.near_misses[prefix]['end']
                           ['fn-1'], '{}_predicted'.format(prefix)] = 1
+        self.pred_df=self.fixed_df
 
     def get_middle_miss(self, prefix):
-        true_narr = self.pred_df[self.pred_df['{}_true'.format(
-            prefix)] == 1].copy()
-        middle_miss_df = true_narr['{}_predicted'.format(prefix)].where((
-            (true_narr['{}_predicted'.format(prefix)] == 0) & (true_narr['{}_predicted'.format(prefix)].shift(1) == 1) & (true_narr['{}_predicted'.format(prefix)].shift(-1) == 1)))
+        # true_narr = self.pred_df[self.pred_df['{}_true'.format(
+        #     prefix)] == 1].copy()
+        middle_miss_df = self.pred_df['{}_predicted'.format(prefix)].where(
+            (self.pred_df['{}_predicted'.format(prefix)] == 0) & 
+            (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 1) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(-1) == 1)
+            )
+        # middle_miss_df = self.pred_df['{}_predicted'.format(prefix)].where(
+        #     (self.pred_df['{}_predicted'.format(prefix)] == 0) &
+        #     (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 1) &
+        #     (true_narr['{}_predicted'.format(prefix)].shift(-1) == 1)
+        #     )
+
         middle_miss_df.dropna(inplace=True)
         self.middle_miss[prefix] = middle_miss_df.index.tolist()
         self.get_mid_miss_stat(prefix)
 
+    def get_double_middle_miss(self, prefix):
+        # true_narr = self.pred_df[self.pred_df['{}_true'.format(
+        #     prefix)] == 1].copy()
+        double_middle_miss_df = self.pred_df['{}_predicted'.format(prefix)].where(
+            (self.pred_df['{}_predicted'.format(prefix)] == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(-1) == 1) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(2) == 1) 
+            # &
+            # (self.pred_df['{}_predicted'.format(prefix)].shift(-2) == 1) &
+            # (self.pred_df['{}_predicted'.format(prefix)].shift(3) == 1)
+        )
+        double_middle_miss_df.dropna(inplace=True)
+        self.double_middle_miss[prefix] = double_middle_miss_df.index.tolist()
+        orig=np.array(self.double_middle_miss[prefix].copy())
+        for i in range(1,2):
+            plus = orig+i
+            self.double_middle_miss[prefix].extend(plus)
+        self.get_double_mid_miss_stat(prefix)
+        
+    def get_tree_middle_miss(self, prefix):
+        # true_narr = self.pred_df[self.pred_df['{}_true'.format(
+        #     prefix)] == 1].copy()
+        tree_middle_miss_df = self.pred_df['{}_predicted'.format(prefix)].where(
+            (self.pred_df['{}_predicted'.format(prefix)] == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(2) == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(-1) == 1) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(3) == 1)
+            # &
+            # (self.pred_df['{}_predicted'.format(prefix)].shift(3) == 1) &
+            # (self.pred_df['{}_predicted'.format(prefix)].shift(-3) == 1)
+        )
+        tree_middle_miss_df.dropna(inplace=True)
+        self.tree_middle_miss[prefix] = tree_middle_miss_df.index.tolist()
+        orig=np.array(self.tree_middle_miss[prefix].copy())
+        for i in range(1,3):
+            plus = orig +i
+            self.tree_middle_miss[prefix].extend(plus) 
+        self.get_tree_mid_miss_stat(prefix)
+        
+    def get_four_middle_miss(self, prefix):
+        # true_narr = self.pred_df[self.pred_df['{}_true'.format(
+        #     prefix)] == 1].copy()
+        four_middle_miss_df = self.pred_df['{}_predicted'.format(prefix)].where(
+            (self.pred_df['{}_predicted'.format(prefix)] == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(2) == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(3) == 0) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(-1) == 1) &
+            (self.pred_df['{}_predicted'.format(prefix)].shift(4) == 1)
+        )
+        four_middle_miss_df.dropna(inplace=True)
+        self.four_middle_miss[prefix] = four_middle_miss_df.index.tolist()
+        orig=np.array(self.four_middle_miss[prefix].copy())
+        for i in range(1,4):
+            plus = orig + i
+            self.four_middle_miss[prefix].extend(plus)      
+        self.get_four_mid_miss_stat(prefix)
+
+    def fix_double_middle_miss(self, prefix):
+        self.get_double_middle_miss(prefix)
+        print("{} double middle misses to be fixed".format(
+            self.stat[prefix]['double_mid_miss']))
+        self.fixed_df.loc[self.double_middle_miss[prefix],
+                          '{}_predicted'.format(prefix)] = 1
+        self.pred_df=self.fixed_df
+
+
+    def fix_tree_middle_miss(self, prefix):
+        self.get_tree_middle_miss(prefix)
+        print("{} tree middle misses to be fixed".format(
+            self.stat[prefix]['tree_mid_miss']))
+        self.fixed_df.loc[self.tree_middle_miss[prefix],
+                          '{}_predicted'.format(prefix)] = 1
+        self.pred_df=self.fixed_df
+
+        
+    def fix_four_middle_miss(self, prefix):
+        self.get_four_middle_miss(prefix)
+        print("{} four middle misses to be fixed".format(
+            self.stat[prefix]['four_mid_miss']))
+        self.fixed_df.loc[self.four_middle_miss[prefix],
+                          '{}_predicted'.format(prefix)] = 1
+        self.pred_df=self.fixed_df
+
+        
     def fix_middle_miss(self, prefix):
         self.get_middle_miss(prefix)
         print("{} middle misses to be fixed".format(self.stat[prefix]['mid']))
-        self.fixed_df.loc[self.middle_miss[prefix], '{}_predicted'.format(prefix)] = 1
+        self.fixed_df.loc[self.middle_miss[prefix],
+                          '{}_predicted'.format(prefix)] = 1
+        self.pred_df=self.fixed_df
+
 
     def get_stand_alone(self, prefix):
-        true_not_nar = self.pred_df[self.pred_df['{}_true'.format(
-            prefix)] == 0].copy()
-        stand_alone_df = true_not_nar['{}_predicted'.format(prefix)].where(((true_not_nar['{}_predicted'.format(prefix)] == 1) &
-                                                                            (true_not_nar['{}_predicted'.format(prefix)].shift(1) == 0) &
-                                                                            (true_not_nar['{}_predicted'.format(prefix)].shift(-1) == 0) &
-                                                                            (true_not_nar['{}_predicted'.format(prefix)].shift(2) == 0) &
-                                                                            (true_not_nar['{}_predicted'.format(
-                                                                                prefix)].shift(-2) == 0)
+        # true_not_nar = self.pred_df[self.pred_df['{}_true'.format(
+        #     prefix)] == 0].copy()
+        stand_alone_df = self.pred_df['{}_predicted'.format(prefix)].where(((self.pred_df['{}_predicted'.format(prefix)] == 1) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(-1) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(2) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(-2) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(3) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(-3) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(4) == 0) &
+                                                                            (self.pred_df['{}_predicted'.format(prefix)].shift(-4) == 0) 
                                                                             ))
         stand_alone_df.dropna(inplace=True)
         self.stand_alone[prefix] = stand_alone_df.index.tolist()
         self.get_stand_alone_stat(prefix)
 
+    def get_double_stand_alone(self, prefix):
+        # true_not_nar = self.pred_df[self.pred_df['{}_true'.format(
+        #     prefix)] == 0].copy()
+        double_stand_alone_df = self.pred_df['{}_predicted'.format(prefix)].where((self.pred_df['{}_predicted'.format(prefix)] == 1) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(1) == 1) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(-1) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(-2) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(-3) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(-4) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(2) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(3) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(4) == 0) &
+                                                                                  (self.pred_df['{}_predicted'.format(prefix)].shift(5) == 0) 
+                                                                                  )
+        double_stand_alone_df.dropna(inplace=True)
+        self.double_stand_alone[prefix] = double_stand_alone_df.index.tolist()
+        orig=np.array(self.double_stand_alone[prefix].copy())
+        for i in range(1,2):
+            plus = orig+i
+            self.double_stand_alone[prefix].extend(plus)
+        self.get_double_stand_alone_stat(prefix)
+
+
+
+        
     def fix_stand_alone(self, prefix):
         self.get_stand_alone(prefix)
-        print("{} stande alone to be fixed".format(self.stat[prefix]['stand_alone']))
-        self.fixed_df.loc[self.stand_alone[prefix], '{}_predicted'.format(prefix)] = 0
+        print("{} stande alone to be fixed".format(
+            self.stat[prefix]['stand_alone']))
+        self.fixed_df.loc[self.stand_alone[prefix],
+                          '{}_predicted'.format(prefix)] = 0
+        self.pred_df=self.fixed_df
+
+
+    def fix_double_stand_alone(self, prefix):
+        self.get_double_stand_alone(prefix)
+        print("{} double stande alone to be fixed".format(
+            self.stat[prefix]['double_stand_alone']))
+        self.fixed_df.loc[self.double_stand_alone[prefix],
+                          '{}_predicted'.format(prefix)] = 0
+        self.pred_df=self.fixed_df
+
+
+
 
     def fix_errors(self, prefix):
         self.labels = self.pred_df['{}_true'.format(prefix)].unique().tolist()
         self.fix_near_miss(prefix)
-        self.fix_middle_miss(prefix)
-        self.fix_stand_alone(prefix)
+        
+        loop = [s for s in self.fix_list if "loop" in s]
+        if loop:
+            iterr=int(loop[0].split('_')[-1])
+            for i in range(iterr):
+                self.fix_middle_miss(prefix)
+        for mode in self.fix_list:
+            if mode=='four_miss':
+                self.fix_four_middle_miss(prefix)
+            if mode=='tree_miss':
+                self.fix_tree_middle_miss(prefix)
+            if mode=='double_miss':
+                self.fix_double_middle_miss(prefix)
+            if mode=='single_miss':
+                self.fix_middle_miss(prefix)
+            if mode=='double_sa':
+                self.fix_double_stand_alone(prefix)
+            if mode=='single_sa':
+                self.fix_stand_alone(prefix)
 
     def fix_error_all_prefix(self):
         for t in self.prefixes:
             print(t)
             self.fix_errors(t)
             self.get_all_stat(t)
-

@@ -291,7 +291,10 @@ def load_pickle(dir_name, file_name):
     return pickle.load(open(path, "rb"))
 
 def get_single_unique(group):
-    return group.unique()[0]
+    if isinstance(group,list):
+        return group[0]
+    else:
+        return group.unique()[0]
 
 def order_meta_features(_meta):
     meta=_meta.copy()

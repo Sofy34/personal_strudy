@@ -1,3 +1,6 @@
+import re
+import matplotlib.pyplot as plt
+from bidi import algorithm as bidialg      # needed for arabic, hebrew
 from collections import Counter
 import types
 import classes
@@ -52,32 +55,45 @@ def flatten_groups(groups, y):
     return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
 
 
-def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval =False, use_par=True):
+def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval =False, use_par=False):
     scores = []
     par_scores = []
     full_scores = {}
     par_full_scores = {}
-    for split in cv_db['{}_{}'.format(prefix, unit)].unique():
-        split_data = cv_db[cv_db['{}_{}'.format(prefix, unit)] == split]
+    if unit == 'all':
+        split_data=cv_db.copy()
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
         labels = np.unique(y_true)
         if print_rep:
             get_prediction_report(y_true, y_pred, np.unique(
-                y_true), "{} {}".format(unit, split))
+                y_true), "{} {}".format(unit, 0))
         score, full_score = common_utils.get_report(
             y_true, y_pred, labels, n_t, segeval)
-        if use_par:
-            par_y_true, par_y_pred = extract_y_paragraph(
-                split_data, prefix, labels)
-            if len(par_y_true) == 0:
-                raise Exception("par_y_true has 0 length!")
-            par_score, par_full_score = common_utils.get_report(
-                par_y_true, par_y_pred, labels, n_t, segeval)
-            par_scores.append(par_score)
-            par_scores.append(par_score)
         scores.append(score)
-        full_scores[split] = full_score
+        full_scores[0]=full_score
+    else:
+        for split in cv_db['{}_{}'.format(prefix, unit)].unique():
+            split_data = cv_db[cv_db['{}_{}'.format(prefix, unit)] == split].copy()
+            y_pred = split_data['{}_predicted'.format(prefix)].tolist()
+            y_true = split_data['{}_true'.format(prefix)].tolist()
+            labels = np.unique(y_true)
+            if print_rep:
+                get_prediction_report(y_true, y_pred, np.unique(
+                    y_true), "{} {}".format(unit, split))
+            score, full_score = common_utils.get_report(
+                y_true, y_pred, labels, n_t, segeval)
+            if use_par:
+                par_y_true, par_y_pred = extract_y_paragraph(
+                    split_data, prefix, labels)
+                if len(par_y_true) == 0:
+                    raise Exception("par_y_true has 0 length!")
+                par_score, par_full_score = common_utils.get_report(
+                    par_y_true, par_y_pred, labels, n_t, segeval)
+                par_scores.append(par_score)
+                par_scores.append(par_score)
+            scores.append(score)
+            full_scores[split] = full_score
     return scores, full_scores, par_scores, par_full_scores
 
 
@@ -129,7 +145,7 @@ def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, use_p
             # ens_clf_pred_proba = ens_clf.predict_proba(X_test)
             y_true = y_test.tolist()
         single_cv_db['ens_predicted'] = ens_clf_pred
-        if ens_clf_pred_proba:
+        if not ens_clf_pred_proba is None:
             single_cv_db['ens_proba_0'] = ens_clf_pred_proba[:, 0]
             single_cv_db['ens_proba_1'] = ens_clf_pred_proba[:, 1]
         single_cv_db['ens_group'] = group_test.tolist()
@@ -179,7 +195,8 @@ def pack_train_test_for_crf(prediction_db, indices, cols, **crf_params):
             item[feature] = row[feature]
         X_flat.append(item)
     y = prediction_db[prediction_db['crf_group'].isin(
-        indices['train'])]['crf_true']
+        indices['train'])]['crf_true'].tolist()
+    y =common_utils.convert_binary_label_to_str(y)
     X_train = common_utils.reshape_to_seq(
         X_flat, crf_params['seq_len'], crf_params['seq_step'])
     y_train = common_utils.reshape_to_seq(
@@ -191,7 +208,8 @@ def pack_train_test_for_crf(prediction_db, indices, cols, **crf_params):
             item[feature] = row[feature]
         X_flat.append(item)
     y = prediction_db[prediction_db['crf_group'].isin(
-        indices['test'])]['crf_true']
+        indices['test'])]['crf_true'].tolist()
+    y =common_utils.convert_binary_label_to_str(y)
     y_test = common_utils.reshape_to_seq(
         y, crf_params['seq_len'], crf_params['seq_step'])
     X_test = common_utils.reshape_to_seq(
@@ -1125,3 +1143,22 @@ def get_estimator_features(estimator, **tf_params):
     all_features = get_features_df(dir_name="", features=Counter(
         estimator.state_features_).most_common(), tf_name="", is_dic=False, **tf_params)
     return all_features
+
+def plot_important_features(title,coef, feature_names, top_n=20, ax=None, rotation=60):
+    if ax is None:
+        ax = plt.gca()
+    # inds = np.argsort(coef)
+    # low = inds[:top_n]
+    # high = inds[-top_n:]
+    # important = np.hstack([low, high])
+    important = np.arange(len(coef)) # take indices as is
+    myrange = range(len(important))
+    colors = ['red'] * top_n + ['blue'] * top_n
+    ax.bar(myrange, coef, color=colors)
+    ax.set_xticks(myrange)
+    heb_feature_names =[bidialg.get_display(feature) for feature in feature_names]
+    ax.set_xticklabels(heb_feature_names, rotation=rotation, ha="right", fontsize=20)
+    ax.set_xlim(-.7, 2 * top_n)
+    ax.set_frame_on(False)
+    ax.set_title(title)
+    return ax

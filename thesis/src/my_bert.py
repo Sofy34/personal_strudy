@@ -85,7 +85,7 @@ def prepared_cross_validate_bert(docs_map, cv_splits, epoch=3, batch_size=512, d
         for key in ['valid_loss','train_loss']:
             losses[key]=valid_dict[key]
         common_utils.save_json(losses,dir_name,"split_{}_bert_valid_dict_{}".format(split,file_prefix),convert=False)
-        common_utils.save_db(cv_db,dir_name,'bert_cv_db_all_{}'.format(file_prefix))
+        common_utils.save_db(cv_db,dir_name,'bert_pred_{}_{}'.format(split,file_prefix))
     return cv_db
 
 

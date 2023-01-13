@@ -21,15 +21,23 @@ sys.path.append('./src/')
 
 class TfParams:
 
-    def __init__(self, dir_name, tf_type, stop_list=[], doc_indices=[]):
+    def __init__(self, dir_name, tf_type,  split_idx, splits, stop_list=[]):
         self.tf_type = tf_type
         self.stop_list = stop_list
+        self.split_idx=split_idx
+        self.splits = splits
         self.dir_name = dir_name
         self.suffix = '_no.stop' if len(
             stop_list) == 0 else '_stop{}'.format(len(stop_list))
         self.tf = None
-        self.doc_indices = doc_indices
+        self.features = None
         self.set_tf_params()
+        self.fit_train(self.splits[self.split_idx]['train'])
+        self.transform_save(self.splits[self.split_idx]['train'])
+        self.transform_save(self.splits[self.split_idx]['test'])
+        print('>> init {} for split {}: total {} features'.format(self.tf_type, self.split_idx,len(self.features)))
+
+
 
     def set_tf_params(self):
         if self.tf_type == 'char_wb':
@@ -47,10 +55,21 @@ class TfParams:
         else:
             print("ERROR: unknown TfIdf type {}".format(self.tf_type))
 
-    def build_dict(self):
-        self.tf = feature_utils.tfidf_build_all_save_per_doc(
-            self.dir_name, self.per_word, self.per_lemma, self.analyzer, self.suffix, self.stop_list, self.doc_indices)
+
+    def fit_train(self, doc_indices):
+        self.tf = feature_utils.tfidf_selected_fit(
+            dir_name=self.dir_name, 
+            per_word=self.per_word,
+            per_lemma=  self.per_lemma,
+            analyzer= self.analyzer,
+            doc_indices = doc_indices)
         self.features = self.tf.get_feature_names_out()
+
+    
+    def transform_save(self, doc_indices):
+        for doc in doc_indices:
+            doc_tf=feature_utils.tfidf_transform_doc(self.dir_name,doc,self.tf,self.per_lemma)
+            common_utils.save_sparse(self.dir_name,"{:02d}_{}_tfidf_{}{}.npz".format(doc, self.split_idx,self.tf_type, self.suffix), doc_tf)
 
 
 class Sentence:
@@ -76,17 +95,17 @@ class Sentence:
             "is_nar": "<span class='corrStyle'>", "not_nar": "<span>"}
         self.end = "</span>. "
 
-    def set_features(self, feature_dict=None):
+    def set_features(self, feature_dict, split_idx):
         if type(feature_dict) != dict:
             print("ERROR: not a dict")
         else:
-            self.x = feature_dict
+            self.x[split_idx] = feature_dict
 
     def set_y(self, y=None):
         self.y = y
 
-    def get_x(self):
-        return self.x
+    def get_x(self, split_idx):
+        return self.x[split_idx]
 
     def get_text(self):
         return self.text
@@ -149,9 +168,11 @@ class Document:
                  idx,
                  path,
                  tf_params={},
+                 splits={},
                  merged_str="merged_db",
                  neighbor_radius=3):
         self.sent_list = []
+        self.splits = splits
         self.reshaped = {}
         self.doc_idx = idx
         self.path = path
@@ -165,29 +186,47 @@ class Document:
         self.colored_ind_df = pd.DataFrame()
         self.nar_df = pd.DataFrame()
         self.nar_map = {}
+        self.db_names=['merged', 'sent_db', 'sim_vec']
 
-    def load_doc_features(self):
+    def load_doc_features(self): 
         self.doc_db['merged'] = pd.read_csv(os.path.join(
             self.path, "{:02d}_{}.csv".format(self.doc_idx, self.merged_str)))
         self.doc_db['sent_db'] = pd.read_csv(os.path.join(
             self.path, "{:02d}_sent_db.csv".format(self.doc_idx)), usecols=['text', 'par_type', 'nar_idx'])
         self.doc_db['sim_vec'] = pd.read_csv(os.path.join(
             self.path, "{:02d}_sent_sim_vec300_db.csv".format(self.doc_idx)))
-        for tf_key, tf_item in self.tf_params.items():
-            self.doc_db['tfidf_{}'.format(tf_item.tf_type)] = sparse.load_npz(os.path.join(
-                self.path, "{:02d}_tfidf_{}{}.npz".format(self.doc_idx, tf_item.tf_type, tf_item.suffix)))
         self.doc_len = self.doc_db['merged'].shape[0]
-        feature_utils.curr_doc_db = self.doc_db
+        for split_idx in self.splits.keys():
+            if not split_idx in self.doc_db.keys():
+                self.doc_db[split_idx]={}
+            for tf_key, tf_item in self.tf_params[split_idx].items():
+                db_key = 'tfidf_{}'.format(tf_item.tf_type)
+                self.doc_db[split_idx][db_key] = sparse.load_npz(os.path.join(
+                        self.path, "{:02d}_{}_tfidf_{}{}.npz".format(self.doc_idx, split_idx, tf_item.tf_type, tf_item.suffix)))
+        for name in self.db_names:
+            feature_utils.curr_doc_db[name] = self.doc_db[name]
 
-    def pack_doc_features(self):
+    def pack_doc_features(self, tf_to_use):
         for sent_idx in range(self.doc_len):
             par_idx = self.doc_db['merged'].loc[sent_idx, 'par_idx_in_doc']
             sent = Sentence(self.doc_idx, self.doc_len, par_idx,
                             sent_idx, self.doc_db['sent_db'].loc[sent_idx, 'text'],
                             self.doc_db['sent_db'].loc[sent_idx, 'par_type'],
                             self.doc_db['sent_db'].loc[sent_idx, 'nar_idx'])
-            sent.set_features(feature_utils.sent2features(
-                sent_idx, sent_idx, self.doc_len, self.neighbor_radius))
+            # set features per split
+            for split_idx, split in self.splits.items():
+                for tf_key, tf_item in self.tf_params[split_idx].items():
+                    db_key = 'tfidf_{}'.format(tf_item.tf_type)
+                    feature_utils.curr_doc_db[db_key] = self.doc_db[split_idx][db_key]
+                
+                sent.set_features(feature_utils.sent2features(
+                    sent_idx= sent_idx,
+                    idx_in_seq = sent_idx,
+                    seq_len = self.doc_len, 
+                    neighbor_radius = self.neighbor_radius, 
+                    tf_to_use= tf_to_use, 
+                    tf_features=self.tf_params[split_idx]), 
+                    split_idx)
             sent.set_y(feature_utils.sent2label(sent_idx))
             if sent.get_y() == 'is_nar':
                 self.assign_sentence_to_narative(sent.nar_idx, sent.text)
@@ -205,9 +244,10 @@ class Document:
     def remove_dbs(self):
         del self.doc_db
 
-    def pack_doc(self):
+    def pack_doc(self, tf_to_use=['lemma','word','char_wb']):
+        print('tf to be used: {}'.format(tf_to_use))
         self.load_doc_features()
-        self.pack_doc_features()
+        self.pack_doc_features(tf_to_use)
         self.remove_dbs()
 
     def reshape_doc(self, seq_len, step):
@@ -217,13 +257,13 @@ class Document:
         print("Doc {} reshaped from {} to {}".format(
             self.doc_idx, self.doc_len, len(self.reshaped[shape_name])))
 
-    def get_x(self, reshaped_name=''):
+    def get_x(self, reshaped_name='', split_idx = 0):
         x = []
         if not reshaped_name:
-            x = [sent.get_x() for sent in self.sent_list]
+            x = [sent.get_x(split_idx) for sent in self.sent_list]
         else:
             for sent_seq in self.reshaped[reshaped_name]:
-                x.append([sent_seq[i].get_x() for i in range(len(sent_seq))])
+                x.append([sent_seq[i].get_x(split_idx) for i in range(len(sent_seq))])
         return x
 
     def get_y(self, reshaped_name=''):
@@ -323,6 +363,7 @@ class Dataset:
     def __init__(self,
                  dir_name=None,
                  merged_str="merged_db",
+                 splits= {},
                  neighbor_radius=3,
                  doc_indices=[]
                  ):
@@ -330,6 +371,7 @@ class Dataset:
         self.dir_name = dir_name
         self.path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name)
         self.neighbor_radius = neighbor_radius
+        self.splits=splits
         self.merged_str = merged_str
         if len(doc_indices) == 0:
             self.doc_indices = np.arange(1, 81)
@@ -340,21 +382,17 @@ class Dataset:
         self.print_df = pd.DataFrame()
         print("{} init called".format(self.__class__.__name__))
 
-    def create_tfidf(self):
-        for key, tf in self.tf_params.items():
-            tf.build_dict()
-            print("TdIdf {} built".format(key))
 
-    def pack_dataset(self):
-        self.create_tfidf()
+    def pack_dataset(self,tf_to_use=['lemma','word','char_wb']):
         print("\nPacking dataset...")
         for idx in self.doc_indices:
             doc = Document(idx=idx,
                            path=self.path,
                            tf_params=self.tf_params,
+                           splits = self.splits,
                            merged_str=self.merged_str,
                            neighbor_radius=self.neighbor_radius)
-            doc.pack_doc()
+            doc.pack_doc(tf_to_use)
             print("{}".format(idx, end=' '))
             self.doc_map[idx] = doc
 
@@ -364,10 +402,10 @@ class Dataset:
             self.doc_map[idx].reshape_doc(seq_len, step)
             print("{}".format(idx, end=' '))
 
-    def get_x(self, doc_indices, reshape_name=''):
+    def get_x(self, doc_indices, reshape_name='', split_idx = 0):
         x = []
         for idx in doc_indices:
-            x.extend(self.doc_map[idx].get_x(reshape_name))
+            x.extend(self.doc_map[idx].get_x(reshape_name, split_idx))
         return x
 
     def get_paragraph(self, doc_indices, reshape_name=''):
@@ -399,9 +437,12 @@ class Dataset:
         pickle.dump(self, open(path, "wb"))
 
     def set_tf_params(self, tf_name, stop_list=[]):
-        self.tf_params[tf_name] = TfParams(
-            self.dir_name, tf_name, stop_list, self.doc_indices)
-
+        for split_idx in self.splits.keys():
+            if not split_idx in self.tf_params:
+                self.tf_params[split_idx]={}
+            self.tf_params[split_idx][tf_name] = TfParams(
+                self.dir_name, tf_name, split_idx, self.splits)
+  
     def pack_sent_per_paragraph(self):
         for idx in self.doc_indices:
             self.doc_map[idx].pack_sent_per_paragraph()

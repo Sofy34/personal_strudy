@@ -12,7 +12,12 @@ import json
 import feature_utils
 from itertools import islice
 from datetime import datetime
+from scipy import sparse
 
+def save_sparse(dir_name, file_name, sparse_matrix):
+    path = os.path.join(os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, file_name))
+    print("saving sparse: {} of size ".format(os.path.basename(path)), sparse_matrix.get_shape())
+    sparse.save_npz(path, sparse_matrix)
 
 def get_doc_idx_from_name(file_name):
     base_name = os.path.basename(file_name)
@@ -21,6 +26,8 @@ def get_doc_idx_from_name(file_name):
 
 def concat_dbs_by_idx(dir_name, db_name, indices, cols=[], index_name=""):
     df_list = []
+    # print('concatinating {} for {} docs'.format(os.path.join(os.getcwd(), defines.PATH_TO_DFS,
+    #                    dir_name, "*_{}.csv".format(db_name)),len(indices)))
     for idx in indices:
         df_list.append(os.path.join(os.getcwd(), defines.PATH_TO_DFS,
                        dir_name, "{:02d}_{}.csv".format(idx, db_name)))

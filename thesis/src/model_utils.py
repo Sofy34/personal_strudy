@@ -229,9 +229,9 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
         print("{} split started for {} train sequences...".format(
             split, len(indices['train'])))
         X_train, y_train, _, _ = get_X_y_by_doc_indices(
-            docs_map, indices['train'], seq_len, step)
+            docs_map, indices['train'], seq_len, step, split=split)
         X_test, y_test, groups_test, par_test = get_X_y_by_doc_indices(
-            docs_map, indices['test'], seq_len, step)
+            docs_map, indices['test'], seq_len, step, split=split)
         start_time = time.time()
         if crf_params:
             crf = CRF(
@@ -262,11 +262,13 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
         single_cv_db['crf_sent_idx'] = single_cv_db.index
         # save features from current fold
         if docs_map.__class__.__name__ == 'Dataset':
-            single_ftr_db = get_estimator_features(crf, **docs_map.tf_params)
+            single_ftr_db = get_estimator_features(crf, **docs_map.tf_params[split])
+            print('split {} feature len {}, db len {}, columns {}'.format(split, len(crf.state_features_),
+                len(single_ftr_db.index),  single_ftr_db.columns))
             if idx == 0:
                 ftr_db = single_ftr_db
             else:
-                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight','string']], on=['label', 'attr'], suffixes=(
+                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight','type','str']], on=['label', 'attr','type','str'], suffixes=(
                     "_{}".format(split), None), how='outer', copy=False, validate='one_to_one')
 
         cv_db = pd.concat([cv_db, single_cv_db],
@@ -421,7 +423,7 @@ def split_test_train_docs(docs_map, test_percent, seq_len, step, seed=None):
     return X_train, y_train, X_test, y_test, test_idx, groups_train, groups_test
 
 
-def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
+def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step, split):
     X = []
     y = []
     groups = []
@@ -444,7 +446,7 @@ def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step):
         y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
         groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
     else:  # assume it's dataset TBD add type check
-        X = docs_map.get_x(doc_indices, reshape_name)
+        X = docs_map.get_x(doc_indices, reshape_name,split)
         y = docs_map.get_y(doc_indices, reshape_name)
         groups = docs_map.get_group(doc_indices, reshape_name)
         par = docs_map.get_paragraph(doc_indices, reshape_name)
@@ -863,9 +865,22 @@ def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=F
         features_df["weight"] = [key[1] for key in features]
         features_df["label"] = [key[0][1] for key in features]
         features_df["attr"] = [key[0][0] for key in features]
-    features_df["string"] = features_df["attr"].transform(get_tf_string)
+    # features_df["string"] = features_df["attr"].transform(get_tf_string)
+    typed_df=features_df["attr"].apply(get_tf_type_and_string)
+    features_df.merge(typed_df,left_index=True,right_index=True)
+    features_df=features_df.merge(typed_df,left_index=True,right_index=True)
     del tf_features
     return features_df
+
+def get_tf_type_and_string(x):
+    dic={'type':'', 'str':''}
+    if '.' in x:
+        splitted=x.split('.')
+        dic['type']=splitted[0]
+        dic['str']=splitted[1]
+    return pd.Series(dic)
+
+
 
 
 class CrfTransformer(TransformerMixin, BaseEstimator):

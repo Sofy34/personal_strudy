@@ -115,12 +115,19 @@ def get_all_docs_lemma(dir_name):
     all_docs_lemma.reset_index(inplace=True)
     return all_docs_lemma
 
+def get_docs_lemma(dir_name,doc_indices):
+    docs_lemma=common_utils.concat_dbs_by_idx(dir_name=dir_name, db_name="sent_lemma_db", indices=doc_indices,cols=['sent_lemma'])
+    return docs_lemma
 
 def get_all_doc_sentenses(dir_name):
-    # all_docs_sent = pd.concat(map(pd.read_csv, glob.glob(os.path.join(os.getcwd(),defines.PATH_TO_DFS, dir_name,"*_sent_db.csv"))),axis=0)
     all_docs_sent = common_utils.concat_dbs(dir_name, "sent_db")[
         ['file_idx', 'text', 'is_nar']]
     return all_docs_sent
+
+def get_docs_sentenses(dir_name,doc_indices):
+    docs_sent = common_utils.concat_dbs_by_idx(dir_name=dir_name,db_name= "sent_db",indices=doc_indices,cols=
+        ['text'])
+    return docs_sent
 
 
 def tfidf_transform_doc(dir_name, doc_idx, tfidf, per_lemma=True):
@@ -135,11 +142,11 @@ def tfidf_transform_doc(dir_name, doc_idx, tfidf, per_lemma=True):
     return tfidf.transform(corpus)
 
 
-def tfidf_fit(dir_name, per_word=True, per_lemma=True, analyzer='char', n_min=3, n_max=5, min_df=5, stop_words=[]):
+def tfidf_fit(dir_name, per_word=True, per_lemma=True, analyzer='char', n_min=3, n_max=5, min_df=5, stop_words=[], doc_indices=[]):
     data_list = []
     if per_word:
         if per_lemma:
-            corpus = get_all_docs_lemma(dir_name)
+            corpus = get_all_docs_lemma(dir_name,doc)
             col_name = 'sent_lemma'
         else:
             corpus = get_all_doc_sentenses(dir_name)
@@ -149,6 +156,28 @@ def tfidf_fit(dir_name, per_word=True, per_lemma=True, analyzer='char', n_min=3,
             lowercase=False, stop_words=stop_words, min_df=min_df)
     else:
         corpus = get_all_doc_sentenses(dir_name)
+        data_list = corpus['text'].tolist()
+        tfidf = TfidfVectorizer(lowercase=False,
+                                analyzer=analyzer,
+                                ngram_range=(n_min, n_max),
+                                min_df=min_df,
+                                )
+    return tfidf.fit(data_list)
+
+def tfidf_selected_fit(dir_name, per_word=True, per_lemma=True, analyzer='char', n_min=3, n_max=5, min_df=5, stop_words=[], doc_indices=[]):
+    data_list = []
+    if per_word:
+        if per_lemma:
+            corpus = get_docs_lemma(dir_name,doc_indices)
+            col_name = 'sent_lemma'
+        else:
+            corpus = get_docs_sentenses(dir_name,doc_indices)
+            col_name = 'text'
+        data_list = corpus[col_name].tolist()
+        tfidf = TfidfVectorizer(
+            lowercase=False, stop_words=stop_words, min_df=min_df)
+    else:
+        corpus = get_docs_sentenses(dir_name,doc_indices)
         data_list = corpus['text'].tolist()
         tfidf = TfidfVectorizer(lowercase=False,
                                 analyzer=analyzer,
@@ -525,7 +554,7 @@ def pack_all_doc_sentences_to_map(dir_name, per_par=False, limit=0, doc_as_seque
     return docs_map
 
 
-def sent2features(sent_idx, idx_in_seq, seq_len=6, neighbor_radius=2):
+def sent2features(sent_idx, idx_in_seq, seq_len=6, neighbor_radius=2, tf_to_use=['lemma','word','char_wb'], tf_features={}):
     global curr_doc_db
     features = {}
     columns = list(curr_doc_db['merged'].columns.values)
@@ -568,17 +597,25 @@ def sent2features(sent_idx, idx_in_seq, seq_len=6, neighbor_radius=2):
     features.update(update)
 
     update = {}
-    for tf_type in defines.TF_TYPES:
+    for tf_type in tf_to_use:
         tf_str = 'tfidf_{}'.format(tf_type)
+        f_name = tf_type if not 'char' in tf_type else 'char'
         if tf_str in curr_doc_db.keys():
             tfidf_feature_indices = curr_doc_db[tf_str][sent_idx, :].nonzero()[
                 1]
             for i in tfidf_feature_indices:
-                update["{}_{}".format(
-                    tf_str, i)] = curr_doc_db[tf_str][sent_idx, i].item()
+                # update["{}_{}".format(
+                #     tf_str, i)] = curr_doc_db[tf_str][sent_idx, i].item()
+                # store raw hebrew string value
+                update['{}.{}'.format(f_name,get_tf_feature_name(tf_type, i, tf_features))] = curr_doc_db[tf_str][sent_idx, i].item()
             features.update(update)
 
     return features
+
+
+def get_tf_feature_name(tf_str, tf_idx, tf_features):
+    return tf_features[tf_str].features[tf_idx]
+
 
 
 def sent2features_orig(sent_idx, idx_in_seq, seq_len=6, neighbor_radius=2):
@@ -970,6 +1007,7 @@ def prepared_cross_val_all_regerssors(sent_db, tf, splits, prefix):
         regr_pred[name] = get_cross_val_score_pred(
             regr, sent_db, tf, splits, prefix)
     return regr_pred
+    
 
 
 def fit_predict_all_regressors(X_train, y_train, X_test):

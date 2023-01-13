@@ -175,7 +175,7 @@ def tfidf_build_all_save_per_doc(dir_name, per_word=True, per_lemma=True, analyz
         X = tfidf_transform_doc(dir_name, doc_prefix, tf, per_lemma)
         sparse.save_npz(os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,
                         "{:02d}_tfidf_{}{}.npz".format(doc_prefix, tf_string, tf_suffix)), X)
-        print("{}".format(i), end=" ")
+        print("{} ".format(doc_prefix), end=" ")
     return tf
 
 

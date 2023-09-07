@@ -1,4 +1,5 @@
 import time
+from scipy.sparse import hstack,vstack
 
 from sklearn.model_selection import LeaveOneGroupOut, LeavePGroupsOut, GroupKFold
 from sklearn.metrics import ConfusionMatrixDisplay  # flat_classification_report
@@ -38,14 +39,14 @@ sys.path.append('./src/')
 regressors_instance = {}
 regressors_prediction = {}
 regressors_type = [
-    LogisticRegression(random_state=0),
-    LogisticRegressionCV(random_state=0),
-    PassiveAggressiveClassifier(random_state=0),
-    Perceptron(random_state=0),
+    LogisticRegression(random_state=0,n_jobs=-1),
+    LogisticRegressionCV(random_state=0,n_jobs=-1),
+    PassiveAggressiveClassifier(random_state=0,n_jobs=-1),
+    Perceptron(random_state=0,n_jobs=-1),
     RidgeClassifier(random_state=0),
     # RidgeClassifierCV(),  # eliminted - takes too long and poor performance
-    SGDClassifier(random_state=0),
-    SVC(random_state=0),  # slow+poor performance
+    SGDClassifier(random_state=0,n_jobs=-1),
+    SVC(random_state=0,probability=True),  # slow+poor performance
     DecisionTreeClassifier(random_state=0)
 ]
 
@@ -938,26 +939,31 @@ def get_cross_val_score(estimator, X_train, y_train, prefix="", sampler=None):
     add_score(full_scores, estimator.__class__.__name__, prefix)
 
 
-def get_cross_val_score_pred(estimator, db, tf, cv_splits, prefix="", sampler=None):
+def get_cross_val_score_pred(estimator, db, tf, cv_splits, prefix="", tf_types=[],dir_name='',sampler=None):
     cv_db = pd.DataFrame()
     name = estimator.__class__.__name__
 
     print('*********' + name)
     for idx, (split, indices) in enumerate(cv_splits.items()):
         single_cv_db = pd.DataFrame()
+        indices['train'].sort()
+        indices['test'].sort()
         print("{} split started for {} train sequences...".format(
             split, len(indices['train'])))
-        train_idx = db[db['file_idx'].isin(
-            indices['train'])].index.tolist()
+        if tf_types:
+            X_train = pack_tf_for_split(dir_name,split,tf_types,indices['train'])
+            X_test = pack_tf_for_split(dir_name,split,tf_types,indices['test'])
+        else:
+            train_idx = db[db['file_idx'].isin(indices['train'])].index.tolist()
+            test_idx = db[db['file_idx'].isin(indices['test'])].index.tolist()
+            X_train = itemgetter(train_idx)(tf)
+            X_test = itemgetter(test_idx)(tf)
         y_train = db.loc[db['file_idx'].isin(
             indices['train']), 'is_nar'].tolist()
-        test_idx = db[db['file_idx'].isin(indices['test'])].index.tolist()
         y_true = db.loc[db['file_idx'].isin(
             indices['test']), 'is_nar'].tolist()
         test_group = db.loc[db['file_idx'].isin(
             indices['test']), 'file_idx'].tolist()
-        X_train = itemgetter(train_idx)(tf)
-        X_test = itemgetter(test_idx)(tf)
         start_time = time.time()
         estimator.fit(X_train, y_train)
         fit_time = time.time()-start_time
@@ -974,6 +980,13 @@ def get_cross_val_score_pred(estimator, db, tf, cv_splits, prefix="", sampler=No
 
     return cv_db
 
+def pack_tf_for_split(dir_name,split_idx,tf_types,doc_indices):
+    X_=[]
+    doc_indices.sort()
+    for tf in tf_types:
+        X_.append(common_utils.concat_npz_by_idx(dir_name,split_idx,tf,doc_indices=doc_indices))
+    X=hstack(X_)
+    return X
 
 def save_estimator(estimator):
     global regressors_instance

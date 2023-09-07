@@ -55,13 +55,13 @@ def flatten_groups(groups, y):
     return [groups[j] for j, seq in enumerate(y) for i in range(len(seq))]
 
 
-def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval =False, use_par=False):
+def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, segeval=False, use_par=False):
     scores = []
     par_scores = []
     full_scores = {}
     par_full_scores = {}
     if unit == 'all':
-        split_data=cv_db.copy()
+        split_data = cv_db.copy()
         y_pred = split_data['{}_predicted'.format(prefix)].tolist()
         y_true = split_data['{}_true'.format(prefix)].tolist()
         labels = np.unique(y_true)
@@ -71,18 +71,24 @@ def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, sege
         score, full_score = common_utils.get_report(
             y_true, y_pred, labels, n_t, segeval)
         scores.append(score)
-        full_scores[0]=full_score
+        full_scores[0] = full_score
     else:
         for split in cv_db['{}_{}'.format(prefix, unit)].unique():
-            split_data = cv_db[cv_db['{}_{}'.format(prefix, unit)] == split].copy()
+            split_data = cv_db[cv_db['{}_{}'.format(
+                prefix, unit)] == split].copy()
             y_pred = split_data['{}_predicted'.format(prefix)].tolist()
             y_true = split_data['{}_true'.format(prefix)].tolist()
+            uniq_true = set(y_true)
+            uniq_pred = set(y_pred)
+            delta = uniq_true-uniq_pred
+            if len(delta) > 0:
+                print("label {} is  missing in predicted for split {}, true is {}, pred is {}".format(
+                    delta, split, uniq_true, uniq_pred))
             labels = np.unique(y_true)
             if print_rep:
                 get_prediction_report(y_true, y_pred, np.unique(
                     y_true), "{} {}".format(unit, split))
-            score, full_score = common_utils.get_report(
-                y_true, y_pred, labels, n_t, segeval)
+
             if use_par:
                 par_y_true, par_y_pred = extract_y_paragraph(
                     split_data, prefix, labels)
@@ -92,6 +98,8 @@ def get_report_by_unit(cv_db, prefix, unit='split', n_t=2, print_rep=False, sege
                     par_y_true, par_y_pred, labels, n_t, segeval)
                 par_scores.append(par_score)
                 par_scores.append(par_score)
+            score, full_score = common_utils.get_report(
+                y_true=y_true, y_pred=y_pred, labels=labels, n_t=n_t, segeval=segeval, sample_weight=None)
             scores.append(score)
             full_scores[split] = full_score
     return scores, full_scores, par_scores, par_full_scores
@@ -114,17 +122,13 @@ def extract_y_paragraph(cv_db, prefix, labels):
     return db_par['par_true'].tolist(), db_par['par_predicted'].tolist()
 
 
-def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, use_proba=True,**crf_params):
+def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, cols=['crf_proba_0', 'crf_proba_1', 'bert_proba_0', 'bert_proba_1'], **crf_params):
     prediction_db = prediction_db_.copy()
     cv_db = pd.DataFrame()
-    if use_proba:
-        cols = ['crf_proba_0', 'crf_proba_1', 'bert_proba_0', 'bert_proba_1']
-    else:
-        cols = ['crf_predicted', 'bert_predicted']
     ens_clf_pred_proba = None
     for split, indices in cv_splits.items():
         single_cv_db = pd.DataFrame()
-        
+
         print("{} split started...".format(split))
         if(estimator.__class__.__name__ == 'CRF'):
             X_train, y_train, X_test, y_test = pack_train_test_for_crf(
@@ -142,7 +146,7 @@ def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, use_p
             ens_clf_pred = flatten(ens_clf_pred)
             y_true = flatten(y_test)
         else:
-            # ens_clf_pred_proba = ens_clf.predict_proba(X_test)
+            ens_clf_pred_proba = predict_proba_wrapper(ens_clf, X_test)
             y_true = y_test.tolist()
         single_cv_db['ens_predicted'] = ens_clf_pred
         if not ens_clf_pred_proba is None:
@@ -158,12 +162,43 @@ def prepared_cross_validate_ensemble(estimator, prediction_db_, cv_splits, use_p
     return cv_db
 
 
-def merge_pred_db(dir_name, bert_path, crf_path):
-    bert_pred = common_utils.load_db(dir_name, bert_path)
-    crf_pred = common_utils.load_db(dir_name, crf_path)
-    merged_pred = bert_pred.merge(crf_pred, left_on=['bert_group', 'bert_sent_idx'], right_on=[
-        'crf_group', 'crf_sent_idx'], validate='one_to_one')
+def predict_proba_wrapper(estimator, X):
+    try:
+        ens_clf_pred_proba = estimator.predict_proba(X)
+        print("predict_proba")
+    except:
+        try:
+            ens_clf_pred_proba = estimator._predict_proba_lr(X)
+            print("_predict_proba_lr")
+        except:
+            ens_clf_pred_proba = estimator.decision_function(X)
+            print("decision_function")
+    return ens_clf_pred_proba
+
+
+def merge_pred_db(dir_name, estimators={}):
+    pred_db = {}
+    for k, v in estimators.items():
+        pred_db[k] = common_utils.load_db(dir_name, v)
+        pred_db[k] = pred_db[k].assign(
+            sent_idx=pred_db[k].groupby(['{}_group'.format(k)]).cumcount())
+    estimators_l = list(estimators.keys())
+    for i, k in enumerate(estimators_l[:-1]):
+        next_name = estimators_l[i+1]
+        right = pred_db[next_name]
+        if i == 0:
+            left = pred_db[k]
+        else:
+            left = merged_pred
+        merged_pred = left.merge(right,
+                                 left_on=['{}_group'.format(k),
+                                          'sent_idx'],
+                                 right_on=[
+                                     '{}_group'.format(next_name),
+                                     'sent_idx'],
+                                 validate='one_to_one')
     merged_pred['ens_par'] = merged_pred['crf_par']
+    merged_pred.replace({'not_nar': 0, 'is_nar': 1}, inplace=True)
     return merged_pred
 
 
@@ -196,7 +231,7 @@ def pack_train_test_for_crf(prediction_db, indices, cols, **crf_params):
         X_flat.append(item)
     y = prediction_db[prediction_db['crf_group'].isin(
         indices['train'])]['crf_true'].tolist()
-    y =common_utils.convert_binary_label_to_str(y)
+    y = common_utils.convert_binary_label_to_str(y)
     X_train = common_utils.reshape_to_seq(
         X_flat, crf_params['seq_len'], crf_params['seq_step'])
     y_train = common_utils.reshape_to_seq(
@@ -209,7 +244,7 @@ def pack_train_test_for_crf(prediction_db, indices, cols, **crf_params):
         X_flat.append(item)
     y = prediction_db[prediction_db['crf_group'].isin(
         indices['test'])]['crf_true'].tolist()
-    y =common_utils.convert_binary_label_to_str(y)
+    y = common_utils.convert_binary_label_to_str(y)
     y_test = common_utils.reshape_to_seq(
         y, crf_params['seq_len'], crf_params['seq_step'])
     X_test = common_utils.reshape_to_seq(
@@ -262,13 +297,14 @@ def prepared_cross_validate_crf(docs_map, cv_splits, seq_len=3, step=3, **crf_pa
         single_cv_db['crf_sent_idx'] = single_cv_db.index
         # save features from current fold
         if docs_map.__class__.__name__ == 'Dataset':
-            single_ftr_db = get_estimator_features(crf, **docs_map.tf_params[split])
+            single_ftr_db = get_estimator_features(
+                crf, **docs_map.tf_params[split])
             print('split {} feature len {}, db len {}, columns {}'.format(split, len(crf.state_features_),
-                len(single_ftr_db.index),  single_ftr_db.columns))
+                                                                          len(single_ftr_db.index),  single_ftr_db.columns))
             if idx == 0:
                 ftr_db = single_ftr_db
             else:
-                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight','type','str']], on=['label', 'attr','type','str'], suffixes=(
+                ftr_db = ftr_db.merge(single_ftr_db[['label', 'attr', 'weight', 'type', 'str']], on=['label', 'attr', 'type', 'str'], suffixes=(
                     "_{}".format(split), None), how='outer', copy=False, validate='one_to_one')
 
         cv_db = pd.concat([cv_db, single_cv_db],
@@ -446,7 +482,7 @@ def get_X_y_by_doc_indices(docs_map, doc_indices, seq_len, step, split):
         y = docs_map[docs_map['doc_idx'].isin(doc_indices)]['is_nar']
         groups = docs_map[docs_map['doc_idx'].isin(doc_indices)]['doc_idx']
     else:  # assume it's dataset TBD add type check
-        X = docs_map.get_x(doc_indices, reshape_name,split)
+        X = docs_map.get_x(doc_indices, reshape_name, split)
         y = docs_map.get_y(doc_indices, reshape_name)
         groups = docs_map.get_group(doc_indices, reshape_name)
         par = docs_map.get_paragraph(doc_indices, reshape_name)
@@ -866,21 +902,21 @@ def get_features_df(dir_name, features, tf_name="tf_features_map.json", is_dic=F
         features_df["label"] = [key[0][1] for key in features]
         features_df["attr"] = [key[0][0] for key in features]
     # features_df["string"] = features_df["attr"].transform(get_tf_string)
-    typed_df=features_df["attr"].apply(get_tf_type_and_string)
-    features_df.merge(typed_df,left_index=True,right_index=True)
-    features_df=features_df.merge(typed_df,left_index=True,right_index=True)
+    typed_df = features_df["attr"].apply(get_tf_type_and_string)
+    features_df.merge(typed_df, left_index=True, right_index=True)
+    features_df = features_df.merge(
+        typed_df, left_index=True, right_index=True)
     del tf_features
     return features_df
 
+
 def get_tf_type_and_string(x):
-    dic={'type':'', 'str':''}
+    dic = {'type': '', 'str': ''}
     if '.' in x:
-        splitted=x.split('.')
-        dic['type']=splitted[0]
-        dic['str']=splitted[1]
+        splitted = x.split('.')
+        dic['type'] = splitted[0]
+        dic['str'] = splitted[1]
     return pd.Series(dic)
-
-
 
 
 class CrfTransformer(TransformerMixin, BaseEstimator):
@@ -1159,21 +1195,24 @@ def get_estimator_features(estimator, **tf_params):
         estimator.state_features_).most_common(), tf_name="", is_dic=False, **tf_params)
     return all_features
 
-def plot_important_features(title,coef, feature_names, top_n=20, ax=None, rotation=60):
+
+def plot_important_features(title, coef, feature_names, top_n=20, ax=None, rotation=60):
     if ax is None:
         ax = plt.gca()
     # inds = np.argsort(coef)
     # low = inds[:top_n]
     # high = inds[-top_n:]
     # important = np.hstack([low, high])
-    important = np.arange(len(coef)) # take indices as is
+    important = np.arange(len(coef))  # take indices as is
     myrange = range(len(important))
     colors = ['red'] * top_n + ['blue'] * top_n
     ax.bar(myrange, coef, color=colors)
     ax.set_xticks(myrange)
-    heb_feature_names =[bidialg.get_display(feature) for feature in feature_names]
-    ax.set_xticklabels(heb_feature_names, rotation=rotation, ha="right", fontsize=20)
-    ax.set_xlim(-.7, 2 * top_n)
+    heb_feature_names = [bidialg.get_display(
+        feature) for feature in feature_names]
+    ax.set_xticklabels(heb_feature_names, rotation=rotation,
+                       ha="right", fontsize=20)
+    ax.set_xlim(-.7, top_n)
     ax.set_frame_on(False)
     ax.set_title(title)
     return ax

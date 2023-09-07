@@ -1,3 +1,7 @@
+import matplotlib.pyplot as plt
+
+import seaborn as sns
+from scipy.sparse import hstack, vstack
 import classes
 import pickle
 import os
@@ -13,11 +17,25 @@ import feature_utils
 from itertools import islice
 from datetime import datetime
 from scipy import sparse
+import model_utils
+
 
 def save_sparse(dir_name, file_name, sparse_matrix):
-    path = os.path.join(os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name, file_name))
-    print("saving sparse: {} of size ".format(os.path.basename(path)), sparse_matrix.get_shape())
+    path = os.path.join(os.path.join(
+        os.getcwd(), defines.PATH_TO_DFS, dir_name, file_name))
+    # print("saving sparse: {} of size ".format(os.path.basename(path)), sparse_matrix.get_shape())
     sparse.save_npz(path, sparse_matrix)
+
+
+def open_sparse(path, file_name=''):
+    if file_name:
+        path_ = os.path.join(path, file_name)
+    else:
+        path_ = path
+    sparse_matrix = sparse.load_npz(path_)
+    # print("opening sparse: {} of size ".format(os.path.basename(path)), sparse_matrix.get_shape())
+    return sparse_matrix
+
 
 def get_doc_idx_from_name(file_name):
     base_name = os.path.basename(file_name)
@@ -46,6 +64,21 @@ def concat_dbs_by_idx(dir_name, db_name, indices, cols=[], index_name=""):
         index_name) > 0 else "{}_idx".format(db_name.split('_')[0])
     db.rename(columns={'level_0': 'doc_idx',
               'level_1': new_idx_name}, inplace=True)
+    return db
+
+
+def concat_npz_by_idx(dir_name, split_idx, tf_type, doc_indices):
+    df_list = []
+    for idx in doc_indices:
+        file = glob.glob(os.path.join(os.getcwd(), defines.PATH_TO_DFS,
+                                      dir_name, "{:02d}_{}_tfidf_{}*".format(idx, split_idx, tf_type)))
+        if file:
+            df_list.append(file[0])
+    df_list.sort()
+    # print(df_list)
+    npz_opened = [open_sparse(doc) for doc in df_list]
+    db = vstack(npz_opened).tocsr()
+    del npz_opened
     return db
 
 
@@ -131,18 +164,96 @@ def get_score(y_true, y_pred, labels, sample_weight=None):
     return output_dict['weighted avg']['f1-score']
 
 
-def get_report(y_true, y_pred, labels, sample_weight=None,n_t=2,segeval=False):
+def get_report(y_true, y_pred, labels, score_type='weighted avg', sample_weight=None, n_t=2, segeval=False):
     output_dict = classification_report(
         y_true=y_true,
         y_pred=y_pred,
         labels=labels,
         output_dict=True)
     if segeval:
-        my_se=classes.MySegEval(n_t=n_t)
-        output_dict['segeval']=my_se.get_scores(y_true,y_pred)
-        del output_dict['segeval']['b_stat'] # tbd temporary remove statistic form report to shorten prints
-    score = output_dict['weighted avg']['f1-score']
+        my_se = classes.MySegEval(n_t=n_t)
+        output_dict['segeval'] = my_se.get_scores(y_true, y_pred)
+        # tbd temporary remove statistic form report to shorten prints
+        del output_dict['segeval']['b_stat']
+    score = output_dict[score_type]['f1-score']
     return score, output_dict
+
+
+def get_mean_score(dict_):
+    scores = pd.DataFrame()
+    for spl, v in dict_.items():
+        df = pd.DataFrame(v)
+        for l in df.columns[:2]:
+            scores.loc[spl, 'recall_{}'.format(l)] = df.loc['recall', l]
+            scores.loc[spl, 'f1_{}'.format(l)] = df.loc['f1-score', l]
+            scores.loc[spl, 'precision_{}'.format(l)] = df.loc['precision', l]
+        scores.loc[spl, 'weighted avg'] = df.loc['f1-score', 'weighted avg']
+    scores.loc['mean'] = scores.mean()
+    return scores
+
+
+def get_df_scores_per_label(scores):
+    for_plot = pd.DataFrame()
+    for t in ['recall', 'precision', 'f1']:
+        for l in ['0', '1']:
+            idx = for_plot.shape[0]
+            for_plot.loc[idx, 'metric'] = t
+            for_plot.loc[idx, 'label'] = l
+            for_plot.loc[idx, 'val'] = scores.loc['mean', '{}_{}'.format(t, l)]
+    return for_plot
+
+
+def plot_mean_scores(dict_):
+    scores = get_mean_score(dict_)
+    for_plot = get_df_scores_per_label(scores)
+    ax = sns.barplot(x='metric', y='val', hue='label',
+                     data=for_plot, errwidth=0)
+    for container in ax.containers:
+        ax.bar_label(container)
+
+# gets a dataframe with colums
+# f1_as.is	f1_usampl	prec_as.is	prec_usampl	recall_as.is	recall_usampl
+
+
+def accumulate_compare(db):
+    accumulate_db = pd.DataFrame()
+    db_cols = db.columns
+    db_metrics = set()
+    db_kinds = set()
+    for c in db_cols:
+        spl = c.split('_')
+        db_metrics.add(spl[0])
+        db_kinds.add(spl[1])
+    db_metrics, db_kinds
+    for label in db.index:
+        for metric in db_metrics:
+            for kind in db_kinds:
+                idx = accumulate_db.shape[0]
+                accumulate_db.loc[idx, 'label'] = label
+                accumulate_db.loc[idx, 'metric'] = metric
+                accumulate_db.loc[idx, 'kind'] = kind
+                accumulate_db.loc[idx, 'val'] = db.loc[label, metric+'_'+kind]
+    return accumulate_db
+
+
+def plot_accumulated_db(df):
+    ax = {}
+    for l in df.label.unique():
+        plt.figure(figsize=(10, 6))
+        ax[l] = sns.barplot(x='metric', y='val', hue='kind',
+                            data=df[df['label'] == l], errwidth=0)
+        for container in ax[l].containers:
+            ax[l].bar_label(container)
+        title = 'is_nar' if l == '1' else 'not_nar' if l == '0' else l
+        ax[l].set_title(title)
+        plt.legend(loc='lower center')
+        plt.show()
+
+
+def show_comparison(db):
+    accum_db = accumulate_compare(db)
+    plot_accumulated_db(accum_db)
+    return accum_db
 
 
 def get_class_weights(y):
@@ -171,7 +282,7 @@ def select_dic_keys(docs_map, keys):
 
 
 def convert_str_label_to_binary(y):
-    if isinstance(y[0],str):
+    if isinstance(y[0], str):
         return [0 if i == 'not_nar' else 1 for i in y]
     else:
         return y
@@ -219,8 +330,9 @@ def add_sent_to_docs_map(dir_name, docs_map):
 def save_db(db, dir_name, file_name, keep_index=False,  float_format='%.5f'):
     path = os.path.join(os.getcwd(), defines.PATH_TO_DFS,
                         dir_name, "{}.csv".format(file_name))
-    print("Saving {}, \nindex {}\nfloat_format {}".format(path, keep_index,float_format))
-    db.to_csv(path, index=keep_index,float_format=float_format)
+    print("Saving {}, \nindex {}\nfloat_format {}".format(
+        path, keep_index, float_format))
+    db.to_csv(path, index=keep_index, float_format=float_format)
 
 
 def load_db(dir_name, file_name, keep_index=False):
@@ -238,7 +350,7 @@ def save_best_params(params, score, dir_name):
     save_json(params, dir_name, file_name)
 
 
-def save_json(dic_, dir_name, file_name, convert=True):
+def save_json(dic_, dir_name, file_name, convert=True, indent=4):
     if isinstance(dic_, dict):
         dic = dic_.copy()
         if convert:
@@ -249,19 +361,19 @@ def save_json(dic_, dir_name, file_name, convert=True):
                         dir_name, "{}.json".format(file_name))
     print("Saving {}".format(path))
     with open(path, 'w') as fp:
-        json.dump(dic, fp)
+        json.dump(dic, fp, ensure_ascii=False)  # ,indent=indent)
 
 
-def write_html(df, path,name):
-        html = df.to_html(escape=False, justify="center")
-        html = r'<link rel="stylesheet" type="text/css" href="df_style.css" /><br>' + html
-        # write html to file
-        print_df_path = os.path.join(
-            path, "{}.html".format(name)
-        )
-        text_file = open(print_df_path, "w")
-        text_file.write(html)
-        text_file.close()
+def write_html(df, path, name):
+    html = df.to_html(escape=False, justify="center")
+    html = r'<link rel="stylesheet" type="text/css" href="df_style.css" /><br>' + html
+    # write html to file
+    print_df_path = os.path.join(
+        path, "{}.html".format(name)
+    )
+    text_file = open(print_df_path, "w")
+    text_file.write(html)
+    text_file.close()
 
 
 def load_json(dir_name, file_name, convert=True):
@@ -290,28 +402,40 @@ def reshape_to_seq(input, seq_len, step):
 def dump_to_file(_object, dir_name, file_name):
     path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,
                         file_name+".p")
-    pickle.dump(_object, open(path, "wb"))
+    file = open(path, 'wb')
+    pickle.dump(_object, file)
+    file.close()
+
 
 def load_pickle(dir_name, file_name):
-    path = os.path.join(os.getcwd(), defines.PATH_TO_DFS,dir_name, 
+    path = os.path.join(os.getcwd(), defines.PATH_TO_DFS, dir_name,
                         file_name+".p")
     return pickle.load(open(path, "rb"))
 
+
 def get_single_unique(group):
-    if isinstance(group,list):
+    if isinstance(group, list):
         return group[0]
     else:
         return group.unique()[0]
 
+
+def get_single_hit(group, true_val=1):
+    if isinstance(group, list):
+        return (true_val in group)
+    # else:
+    #     return group.unique()[0]
+
+
 def order_meta_features(_meta):
-    meta=_meta.copy()
-    meta['prefix']=meta['attr'].astype(str).str[:3]
-    meta.loc[meta['prefix'].str.contains(r"\-3",na=False),'order']=-3
-    meta.loc[meta['prefix'].str.contains(r"\-2",na=False),'order']=1
-    meta.loc[meta['prefix'].str.contains(r"\-1",na=False),'order']=2
-    meta.loc[~meta['prefix'].str.contains(r"\+|\-",na=False),'order']=3
-    meta.loc[meta['prefix'].str.contains(r"\+1",na=False),'order']=4
-    meta.loc[meta['prefix'].str.contains(r"\+2",na=False),'order']=5
-    meta.loc[meta['prefix'].str.contains(r"\+3",na=False),'order']=6
-    meta.sort_values(by=['order','mean'],ascending=False,inplace=True)
+    meta = _meta.copy()
+    meta['prefix'] = meta['attr'].astype(str).str[:3]
+    meta.loc[meta['prefix'].str.contains(r"\-3", na=False), 'order'] = -3
+    meta.loc[meta['prefix'].str.contains(r"\-2", na=False), 'order'] = 1
+    meta.loc[meta['prefix'].str.contains(r"\-1", na=False), 'order'] = 2
+    meta.loc[~meta['prefix'].str.contains(r"\+|\-", na=False), 'order'] = 3
+    meta.loc[meta['prefix'].str.contains(r"\+1", na=False), 'order'] = 4
+    meta.loc[meta['prefix'].str.contains(r"\+2", na=False), 'order'] = 5
+    meta.loc[meta['prefix'].str.contains(r"\+3", na=False), 'order'] = 6
+    meta.sort_values(by=['order', 'mean'], ascending=False, inplace=True)
     return meta
